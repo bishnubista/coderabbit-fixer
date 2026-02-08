@@ -13,7 +13,7 @@ The cr-* tools are located at `${CLAUDE_PLUGIN_ROOT}/bin/`. Run them as:
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/bin/cr-gather <PR_NUMBER>
 ${CLAUDE_PLUGIN_ROOT}/bin/cr-status
-${CLAUDE_PLUGIN_ROOT}/bin/cr-next --all
+${CLAUDE_PLUGIN_ROOT}/bin/cr-next 1
 ${CLAUDE_PLUGIN_ROOT}/bin/cr-done <id>
 ${CLAUDE_PLUGIN_ROOT}/bin/cr-metrics end --builds N --commits N --rounds N
 ```
@@ -33,28 +33,37 @@ Use the build command provided in the prompt. Do NOT auto-detect — the caller 
 Set MODE: if prompt says `--quick`, use `cr-next --quick` everywhere (critical + major only).
 
 Initialize counters: `BUILDS=0`, `COMMITS=0`, `ROUNDS=0`.
+Initialize list: `FIXED_IDS=[]` (track IDs of issues you actually fixed).
 
 ## Phase 2: Fix Loop
 
+Process issues ONE AT A TIME for reliability. Build and commit once per round.
+
 ```
 ROUNDS += 1
-WHILE cr-next [--quick] returns issues:
-  1. ${CLAUDE_PLUGIN_ROOT}/bin/cr-next --all [--quick]
-  2. For each issue: read file → apply fix
-  3. After ALL issues fixed: run BUILD_CMD once → BUILDS += 1
-  4. Build passes → ${CLAUDE_PLUGIN_ROOT}/bin/cr-done <id1> <id2> ... (all fixed IDs, also resolves GitHub threads)
-  5. Build fails → debug, fix, re-run BUILD_CMD (BUILDS += 1), then cr-done
-  6. After cr-done: commit all fixes in one commit → COMMITS += 1
+FIXED_IDS = []
+
+WHILE cr-next 1 [--quick] returns an issue:
+  1. ${CLAUDE_PLUGIN_ROOT}/bin/cr-next 1 [--quick]   ← ONE issue only
+  2. Read the file → apply the fix
+  3. ${CLAUDE_PLUGIN_ROOT}/bin/cr-done <id>           ← mark done IMMEDIATELY
+  4. Add <id> to FIXED_IDS
+  (loop back — cr-next 1 will return the next pending issue)
+
+After cr-next says "all fixed":
+  5. Run BUILD_CMD once → BUILDS += 1
+  6. Build passes → commit all fixes in one commit → COMMITS += 1
      git add <changed files>
      git commit -m "fix(pr-review): address CodeRabbit feedback on PR #<NUMBER>"
+  7. Build fails → debug, fix, re-run BUILD_CMD (BUILDS += 1), then commit
 ```
 
 Rules:
-- Fix ALL pending issues in one pass, validate once, commit once (not per-issue)
-- cr-next --all groups issues by file — same-file issues are adjacent, fewer context switches
-- One commit per round (not per issue) — maximizes speed
-- Never mark done until build passes
+- **ONE issue at a time** — fetch one, fix it, mark done, fetch next. Never hold multiple issues in context.
+- cr-done IMMEDIATELY after each fix — ensures no issue is forgotten
+- Build + commit ONCE after all issues are fixed (not per issue) — this is where the speed comes from
 - Never skip — ask user if stuck
+- cr-next groups issues by file within severity, so consecutive issues often share the same file
 
 ## Phase 3: Verify
 
