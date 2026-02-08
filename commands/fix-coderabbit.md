@@ -5,6 +5,8 @@ allowed-tools: Task, Bash
 
 Delegate to the coderabbit-pr-reviewer agent. Do NOT fix code yourself.
 
+The cr-* tools are at `${CLAUDE_PLUGIN_ROOT}/bin/`. If `${CLAUDE_PLUGIN_ROOT}` is not set, use `cr-gather` directly (assumes PATH).
+
 ## Steps
 
 1. **Get PR number** from `$ARGUMENTS` or auto-detect: `gh pr view --json number -q '.number'`
@@ -33,7 +35,7 @@ Delegate to the coderabbit-pr-reviewer agent. Do NOT fix code yourself.
    - `--quick` → add "Use --quick mode (critical + major only)." to agent prompt
    - `--bg` → set `run_in_background: true` on the Task tool call
 
-5. **Auto-escalation check**: Run `cr-gather` first, then check issue/file counts.
+5. **Auto-escalation check**: Run `${CLAUDE_PLUGIN_ROOT}/bin/cr-gather` (or `cr-gather`) first, then check issue/file counts.
    If 5+ issues across 3+ files → tell user: "Consider using `coderabbit-coordinator` agent for parallel fixes." Still proceed with the single agent unless user cancels.
 
 6. **Spawn agent**:

@@ -1,8 +1,11 @@
 {
-  "name": "coderabbit",
-  "description": "Automated CodeRabbit PR review fixer — fetches review comments, fixes them autonomously with build validation, and resolves GitHub threads",
+  "name": "coderabbit-fixer",
   "version": "1.0.0",
+  "description": "Automated CodeRabbit PR review fixer — fetches review comments, fixes them autonomously with build validation, and resolves GitHub threads",
+  "license": "MIT",
+  "keywords": ["code-review", "coderabbit", "pr-review", "automation", "github"],
   "author": {
     "name": "Bishnu Bista"
-  }
+  },
+  "repository": "https://github.com/bishnubista/claude-coderabbit-plugin"
 }
