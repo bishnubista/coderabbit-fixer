@@ -8,14 +8,14 @@ Automated [CodeRabbit](https://www.coderabbit.ai/) PR review fixer for [Claude C
 
 ```bash
 # Inside Claude Code, run:
-/plugin install https://github.com/bishnubista/claude-coderabbit-plugin
+/plugin install https://github.com/bishnubista/coderabbit-fixer
 ```
 
 ### Option B: Manual Install (legacy)
 
 ```bash
-git clone https://github.com/bishnubista/claude-coderabbit-plugin.git
-cd claude-coderabbit-plugin && ./install.sh
+git clone https://github.com/bishnubista/coderabbit-fixer.git
+cd coderabbit-fixer && ./install.sh
 ```
 
 Then in any repo with a CodeRabbit-reviewed PR:
@@ -336,7 +336,7 @@ curl -fsSL https://cli.coderabbit.ai/install.sh | sh
 ### Manual Install
 
 ```bash
-cd claude-coderabbit-plugin
+cd coderabbit-fixer
 git pull
 ./install.sh
 ```
