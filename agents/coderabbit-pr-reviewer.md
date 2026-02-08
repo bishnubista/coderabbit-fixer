@@ -8,12 +8,23 @@ color: pink
 
 Fix CodeRabbit review comments using cr-* state tools. Never fetch comments via `gh api`.
 
+The cr-* tools are located at `${CLAUDE_PLUGIN_ROOT}/bin/`. Run them as:
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/bin/cr-gather <PR_NUMBER>
+${CLAUDE_PLUGIN_ROOT}/bin/cr-status
+${CLAUDE_PLUGIN_ROOT}/bin/cr-next 2
+${CLAUDE_PLUGIN_ROOT}/bin/cr-done <id>
+```
+
+If `${CLAUDE_PLUGIN_ROOT}` is not set, fall back to running `cr-gather`, `cr-status`, `cr-next`, `cr-done` directly (assumes they are in PATH).
+
 ## Phase 1: Initialize
 
 ```bash
 rm -f .coderabbit-review.json
-cr-gather <PR_NUMBER>
-cr-status
+${CLAUDE_PLUGIN_ROOT}/bin/cr-gather <PR_NUMBER>
+${CLAUDE_PLUGIN_ROOT}/bin/cr-status
 ```
 
 Use the build command provided in the prompt. Do NOT auto-detect — the caller already determined which stacks need validation.
@@ -24,10 +35,10 @@ Set MODE: if prompt says `--quick`, use `cr-next --quick` everywhere (critical +
 
 ```
 WHILE cr-next [--quick] returns issues:
-  1. cr-next 2 [--quick]
+  1. ${CLAUDE_PLUGIN_ROOT}/bin/cr-next 2 [--quick]
   2. For each issue: read file → apply fix
   3. After batch: run BUILD_CMD once
-  4. Build passes → cr-done <id1> <id2> (also resolves GitHub threads)
+  4. Build passes → ${CLAUDE_PLUGIN_ROOT}/bin/cr-done <id1> <id2> (also resolves GitHub threads)
   5. Build fails → fix, re-validate, then cr-done
   6. After cr-done: commit this batch immediately
      git add <changed files>
@@ -56,9 +67,9 @@ When cr-next says all fixed:
    for delay in 10 15 20 30; do
      sleep $delay
      rm -f .coderabbit-review.json
-     cr-gather <PR_NUMBER>
+     ${CLAUDE_PLUGIN_ROOT}/bin/cr-gather <PR_NUMBER>
      # Check if CodeRabbit has new comments (gathered_at should be recent)
-     NEW_PENDING=$(cr-next [--quick] 2>&1 | head -1)
+     NEW_PENDING=$(${CLAUDE_PLUGIN_ROOT}/bin/cr-next [--quick] 2>&1 | head -1)
      if echo "$NEW_PENDING" | grep -q "fixed\|remaining"; then
        break
      fi

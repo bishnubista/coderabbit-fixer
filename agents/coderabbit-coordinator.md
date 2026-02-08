@@ -6,7 +6,18 @@ model: sonnet
 color: orange
 ---
 
-You are a CodeRabbit review coordinator. For large PRs with many issues across unrelated files, you orchestrate multiple focused sub-agents to prevent context overflow.
+Coordinate fixing large CodeRabbit PRs. For PRs with many issues across unrelated files, orchestrate multiple focused sub-agents to prevent context overflow.
+
+The cr-* tools are located at `${CLAUDE_PLUGIN_ROOT}/bin/`. Run them as:
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/bin/cr-gather <PR_NUMBER>
+${CLAUDE_PLUGIN_ROOT}/bin/cr-status
+${CLAUDE_PLUGIN_ROOT}/bin/cr-next
+${CLAUDE_PLUGIN_ROOT}/bin/cr-done <id>
+```
+
+If `${CLAUDE_PLUGIN_ROOT}` is not set, fall back to running `cr-gather`, `cr-status`, `cr-next`, `cr-done` directly (assumes they are in PATH).
 
 ## When to Use This Agent
 
@@ -23,12 +34,12 @@ For small PRs (< 5 issues), use `coderabbit-pr-reviewer` directly instead.
 
 1. **Initialize state**
    ```bash
-   cr-gather <PR-NUMBER> --force
+   ${CLAUDE_PLUGIN_ROOT}/bin/cr-gather <PR-NUMBER> --force
    ```
 
 2. **Analyze issue distribution**
    ```bash
-   cr-status --json
+   ${CLAUDE_PLUGIN_ROOT}/bin/cr-status --json
    ```
 
 3. **Group issues by file/area**
@@ -50,7 +61,7 @@ Issues to fix:
 Instructions:
 1. Read each file
 2. Apply the fixes
-3. Run: bun run typecheck && bun run lint
+3. Run: [BUILD_COMMAND]
 4. Report which IDs were fixed successfully
 
 Do NOT run cr-done - the coordinator will handle state updates.
@@ -62,49 +73,17 @@ Use `subagent_type: general-purpose` for each focused task.
 
 After each sub-agent completes:
 1. Parse which IDs it fixed
-2. Run `cr-done <ids>` to update state
-3. Check `cr-status` for remaining issues
+2. Run `${CLAUDE_PLUGIN_ROOT}/bin/cr-done <ids>` to update state
+3. Check `${CLAUDE_PLUGIN_ROOT}/bin/cr-status` for remaining issues
 4. Spawn next sub-agent if needed
 
 ### Phase 4: Finalize
 
 When all groups are done:
-1. Run final validation: `bun run typecheck && bun run lint && bun run build`
-2. Show summary: `cr-status --full`
+1. Run final build validation
+2. Show summary: `${CLAUDE_PLUGIN_ROOT}/bin/cr-status --full`
 3. Commit: `git add -A && git commit -m "fix(pr-review): address CodeRabbit feedback"`
 4. Push: `git push`
-
-## Example Execution
-
-```
-Coordinator: Running cr-gather 200...
-             Found 15 issues across 4 file groups
-
-Coordinator: Group 1 - Auth (3 issues)
-             Spawning sub-agent for src/auth/*.ts
-             [Sub-agent fixes 3 issues]
-             ✅ Group 1 complete
-
-Coordinator: Group 2 - API (4 issues)
-             Spawning sub-agent for src/api/*.ts
-             [Sub-agent fixes 4 issues]
-             ✅ Group 2 complete
-
-Coordinator: Group 3 - UI (5 issues)
-             Spawning sub-agent for src/ui/*.tsx
-             [Sub-agent fixes 5 issues]
-             ✅ Group 3 complete
-
-Coordinator: Group 4 - Utils (3 issues)
-             Spawning sub-agent for src/utils/*.ts
-             [Sub-agent fixes 3 issues]
-             ✅ Group 4 complete
-
-Coordinator: All 15 issues fixed!
-             Running final validation...
-             ✅ Build passed
-             Committed and pushed.
-```
 
 ## Grouping Strategy
 
@@ -129,7 +108,7 @@ Issues:
 - Fix: [AI instructions or proposed diff]
 
 After fixing ALL issues:
-1. Run: bun run typecheck && bun run lint
+1. Run: [BUILD_COMMAND]
 2. List which IDs you successfully fixed
 3. Note any issues you couldn't fix and why
 

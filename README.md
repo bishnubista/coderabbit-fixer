@@ -4,15 +4,23 @@ Automated [CodeRabbit](https://www.coderabbit.ai/) PR review fixer for [Claude C
 
 ## Quickstart
 
+### Option A: Install as Claude Code Plugin
+
 ```bash
-# 1. Install the plugin
+# Inside Claude Code, run:
+/plugin install https://github.com/bishnubista/claude-coderabbit-plugin
+```
+
+### Option B: Manual Install (legacy)
+
+```bash
 git clone https://github.com/bishnubista/claude-coderabbit-plugin.git
 cd claude-coderabbit-plugin && ./install.sh
+```
 
-# 2. Open Claude Code in any repo with a CodeRabbit-reviewed PR
-claude
+Then in any repo with a CodeRabbit-reviewed PR:
 
-# 3. Fix all CodeRabbit comments
+```bash
 /fix-coderabbit 71
 ```
 
@@ -39,20 +47,20 @@ That's it. The agent gathers comments, classifies severity, fixes in batches, va
 
 ```bash
 # Check all required dependencies
-gh auth status          # ✓ GitHub CLI authenticated
-jq --version            # ✓ jq installed
-which claude            # ✓ Claude Code installed
+gh auth status          # GitHub CLI authenticated
+jq --version            # jq installed
+which claude            # Claude Code installed
 ```
 
-## Installation
+## Installation Details
 
-```bash
-git clone https://github.com/bishnubista/claude-coderabbit-plugin.git
-cd claude-coderabbit-plugin
-./install.sh
-```
+### Plugin Install (recommended)
 
-The installer copies files to the correct Claude Code locations:
+When installed via `/plugin`, Claude Code manages all files automatically. The `cr-*` CLI tools are referenced via `${CLAUDE_PLUGIN_ROOT}/bin/` — no PATH changes needed.
+
+### Manual Install (legacy)
+
+The `install.sh` script copies files to the standard Claude Code locations:
 
 | Source | Destination | Purpose |
 |--------|-------------|---------|
@@ -61,6 +69,16 @@ The installer copies files to the correct Claude Code locations:
 | `agents/*.md` | `~/.claude/agents/` | Agent definitions |
 
 If `~/.local/bin` is not in your PATH, the installer will prompt you to add it.
+
+### Generated Files
+
+The plugin creates a `.coderabbit-review.json` state file in your project directory during operation. Add it to your project's `.gitignore`:
+
+```bash
+echo '.coderabbit-review.json' >> .gitignore
+```
+
+This file is temporary and deleted after the fix cycle completes.
 
 ## Commands
 
@@ -204,6 +222,28 @@ cr-done --no-resolve            # Skip GitHub thread resolution
 
 ## Architecture
 
+### Plugin Structure
+
+```text
+coderabbit-fixer/
+├── .claude-plugin/
+│   └── plugin.json           # Plugin manifest (name, version, keywords)
+├── commands/
+│   ├── fix-coderabbit.md     # /fix-coderabbit slash command
+│   └── coderabbit-cli-review.md  # /coderabbit-review slash command
+├── agents/
+│   ├── coderabbit-pr-reviewer.md  # Autonomous fix agent (Sonnet)
+│   └── coderabbit-coordinator.md  # Multi-agent orchestrator (Sonnet)
+├── bin/
+│   ├── cr-gather             # Fetch + classify CodeRabbit comments
+│   ├── cr-next               # Return next batch (file-grouped, severity-filtered)
+│   ├── cr-done               # Mark fixed + resolve GitHub threads
+│   └── cr-status             # Progress dashboard
+├── install.sh                # Legacy manual installer
+├── README.md
+└── LICENSE
+```
+
 ### Components
 
 | Component | Type | Role |
@@ -266,13 +306,15 @@ Run `gh auth login` and follow the prompts. The plugin needs read/write access t
 - Ensure the [CodeRabbit GitHub App](https://github.com/apps/coderabbitai) is installed on the repository
 - Check if all threads are already resolved: `cr-gather` only fetches unresolved threads
 
-### `cr-*` commands not found
+### `cr-*` commands not found (manual install only)
 
 Ensure `~/.local/bin` is in your PATH:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"  # Add to ~/.zshrc or ~/.bashrc
 ```
+
+This is not needed when installed via `/plugin` — the plugin uses `${CLAUDE_PLUGIN_ROOT}/bin/` paths.
 
 ### `/coderabbit-review` fails
 
@@ -284,6 +326,15 @@ curl -fsSL https://cli.coderabbit.ai/install.sh | sh
 
 ## Updating
 
+### Plugin Install
+
+```bash
+# Inside Claude Code:
+/plugin update coderabbit-fixer
+```
+
+### Manual Install
+
 ```bash
 cd claude-coderabbit-plugin
 git pull
@@ -291,6 +342,15 @@ git pull
 ```
 
 ## Uninstalling
+
+### Plugin Install
+
+```bash
+# Inside Claude Code:
+/plugin uninstall coderabbit-fixer
+```
+
+### Manual Install
 
 ```bash
 ./install.sh --uninstall
