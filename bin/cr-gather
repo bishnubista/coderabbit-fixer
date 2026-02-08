@@ -204,7 +204,7 @@ SUMMARY=$(echo "$ALL_ISSUES" | jq '{
 jq -n --arg repo "$REPO" --argjson pr "$PR_NUMBER" \
   --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --argjson summary "$SUMMARY" --argjson issues "$ALL_ISSUES" \
-  '{repository: $repo, pr_number: $pr, gathered_at: $ts, summary: $summary, issues: $issues}' > "$STATE_FILE"
+  '{repository: $repo, pr_number: $pr, gathered_at: $ts, summary: $summary, issues: $issues, metrics: {started_at: $ts}}' > "$STATE_FILE"
 
 echo -e "${GREEN}✅ $STATE_FILE${NC}"
 echo "$SUMMARY" | jq -r '"  🔴 \(.critical) critical  🟠 \(.major) major  🟡 \(.minor) minor  💬 \(.nitpick) nitpick  ── \(.total) total across \(.files) files"'

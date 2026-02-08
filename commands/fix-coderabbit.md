@@ -54,3 +54,10 @@ The cr-* tools are at `${CLAUDE_PLUGIN_ROOT}/bin/`. If `${CLAUDE_PLUGIN_ROOT}` i
 7. **Report**:
    - If foreground: issues fixed, rounds needed, PR link. Clean up: `rm -f .coderabbit-review.json`
    - If `--bg`: tell user the agent is running in background and provide the output file path to check progress
+
+8. **Show metrics history** (foreground only):
+   ```bash
+   ${CLAUDE_PLUGIN_ROOT}/bin/cr-metrics show --pr <NUMBER> --last 5
+   ```
+   If `${CLAUDE_PLUGIN_ROOT}` is not set, use `cr-metrics` directly.
+   Display the output to the user — this shows performance trends across runs.

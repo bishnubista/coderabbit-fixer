@@ -20,7 +20,7 @@ if [[ "${1:-}" == "--uninstall" ]]; then
   echo -e "${CYAN}Uninstalling Claude Code x CodeRabbit plugin...${NC}"
   echo ""
 
-  for tool in cr-gather cr-status cr-next cr-done; do
+  for tool in cr-gather cr-status cr-next cr-done cr-metrics; do
     if [[ -f "$BIN_DIR/$tool" ]]; then
       rm -f "$BIN_DIR/$tool"
       echo -e "  ${RED}✗${NC} Removed $BIN_DIR/$tool"
@@ -66,7 +66,7 @@ mkdir -p "$BIN_DIR" "$COMMANDS_DIR" "$AGENTS_DIR"
 
 # Install CLI tools
 INSTALLED=0
-for tool in cr-gather cr-status cr-next cr-done; do
+for tool in cr-gather cr-status cr-next cr-done cr-metrics; do
   if [[ -f "$SCRIPT_DIR/bin/$tool" ]]; then
     cp "$SCRIPT_DIR/bin/$tool" "$BIN_DIR/$tool"
     chmod +x "$BIN_DIR/$tool"
@@ -128,4 +128,4 @@ echo "  /fix-coderabbit --bg         # Run in background"
 echo "  /coderabbit-review           # Local review before pushing"
 echo ""
 echo "CLI tools:"
-echo "  cr-gather <PR>   cr-status   cr-next   cr-done <id>"
+echo "  cr-gather <PR>   cr-status   cr-next   cr-done <id>   cr-metrics"
