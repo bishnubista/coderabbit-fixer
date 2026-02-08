@@ -130,7 +130,7 @@ Required for JSON processing in the `cr-*` tools.
 
 | Problem | Solution |
 |---------|----------|
-| `gh` not authenticated | Run `gh auth login` — the plugin needs read/write access to PRs |
+| `gh` not authenticated | Run `gh auth login` — the plugin needs read and write access to PRs |
 | `cr-gather` returns 0 issues | Verify CodeRabbit has reviewed the PR and the [GitHub App](https://github.com/apps/coderabbitai) is installed |
 | `cr-*` commands not found | Add `~/.local/bin` to PATH (manual install only). Not needed with `/plugin` install |
 | `/coderabbit-review` fails | Install the [CodeRabbit CLI](#how-do-i-install-the-coderabbit-cli) (separate from the GitHub App) |

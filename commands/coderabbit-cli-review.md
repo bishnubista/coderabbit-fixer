@@ -89,4 +89,4 @@ If the user wants fixes:
 - CodeRabbit CLI is free under usage limits
 - Reviews only analyze diffs, not entire codebase
 - Output is in plain text format for easy parsing
-- Uses locally installed `coderabbit` CLI (installed at `~/.local/bin/coderabbit`)
+- Uses locally installed `coderabbit` CLI (on your PATH; location varies by install method)
