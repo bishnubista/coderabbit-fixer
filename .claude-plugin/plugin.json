@@ -1,0 +1,8 @@
+{
+  "name": "coderabbit",
+  "description": "Automated CodeRabbit PR review fixer — fetches review comments, fixes them autonomously with build validation, and resolves GitHub threads",
+  "version": "1.0.0",
+  "author": {
+    "name": "Bishnu Bista"
+  }
+}
