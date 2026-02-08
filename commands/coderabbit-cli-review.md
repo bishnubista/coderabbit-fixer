@@ -15,6 +15,27 @@ Run AI-powered code reviews locally using the CodeRabbit CLI, catching issues be
 
 ## Instructions
 
+### Step 0: Check Prerequisites
+
+Before running the review, verify the CodeRabbit CLI is installed:
+
+```bash
+command -v coderabbit &>/dev/null
+```
+
+If the command is NOT found, stop and tell the user:
+
+> **CodeRabbit CLI is not installed.** Install it with one of:
+>
+> - **curl (macOS/Linux):** `curl -fsSL https://cli.coderabbit.ai/install.sh | sh`
+> - **Homebrew (macOS):** `brew install --cask coderabbit`
+>
+> Then restart your shell and retry.
+>
+> See: https://docs.coderabbit.ai/cli/overview
+
+Do NOT proceed to Step 1 if the CLI is missing.
+
 ### Step 1: Determine Review Type
 
 Parse `$ARGUMENTS` to determine the review type:

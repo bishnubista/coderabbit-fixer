@@ -318,11 +318,62 @@ This is not needed when installed via `/plugin` — the plugin uses `${CLAUDE_PL
 
 ### `/coderabbit-review` fails
 
-This command requires the CodeRabbit CLI (separate from the GitHub App):
+This command requires the CodeRabbit CLI (separate from the GitHub App). See [How do I install the CodeRabbit CLI?](#how-do-i-install-the-coderabbit-cli) below.
+
+## FAQ
+
+### How do I install the GitHub CLI (`gh`)?
+
+The GitHub CLI is **required** — all `cr-*` tools use it to fetch PR comments and resolve threads.
+
+| Platform | Command |
+|----------|---------|
+| **macOS** (Homebrew) | `brew install gh` |
+| **Windows** (WinGet) | `winget install --id GitHub.cli` |
+| **Debian/Ubuntu** (apt) | See [official instructions](https://github.com/cli/cli/blob/trunk/docs/install_linux.md) |
+| **Other** | See [cli.github.com](https://cli.github.com/) |
+
+After installing, authenticate:
 
 ```bash
-curl -fsSL https://cli.coderabbit.ai/install.sh | sh
+gh auth login
 ```
+
+### How do I install the CodeRabbit CLI?
+
+The CodeRabbit CLI is **optional** — only needed for the `/coderabbit-review` command (local review before pushing). The main `/fix-coderabbit` command does not need it.
+
+| Platform | Command |
+|----------|---------|
+| **macOS/Linux** (curl) | `curl -fsSL https://cli.coderabbit.ai/install.sh \| sh` |
+| **macOS** (Homebrew) | `brew install --cask coderabbit` |
+
+After installing, restart your shell and verify:
+
+```bash
+coderabbit --version
+```
+
+For more details, see the [CodeRabbit CLI docs](https://docs.coderabbit.ai/cli/overview).
+
+### Do I need a CodeRabbit subscription?
+
+**For `/fix-coderabbit`** (fixing PR comments): You need the [CodeRabbit GitHub App](https://github.com/apps/coderabbitai) installed on your repository. This is what generates the review comments the plugin fixes.
+
+- **Open-source repos**: Free — CodeRabbit provides full Pro features at no cost for public repositories.
+- **Private repos**: Requires a paid plan. CodeRabbit offers Lite ($12/seat/mo), Pro ($24/seat/mo), and Enterprise (custom) tiers. A free 14-day trial is available. See [CodeRabbit Pricing](https://www.coderabbit.ai/pricing).
+
+**For `/coderabbit-review`** (local CLI review): The CodeRabbit CLI is free under usage limits. No subscription is required for basic local reviews.
+
+### How do I install `jq`?
+
+[jq](https://jqlang.github.io/jq/) is required for JSON processing in the `cr-*` tools.
+
+| Platform | Command |
+|----------|---------|
+| **macOS** (Homebrew) | `brew install jq` |
+| **Windows** (WinGet) | `winget install jqlang.jq` |
+| **Debian/Ubuntu** (apt) | `sudo apt install jq` |
 
 ## Updating
 
