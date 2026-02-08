@@ -103,7 +103,7 @@ Optional — only needed for `/coderabbit-review` (local review). The main `/fix
 
 | Platform | Command |
 |----------|---------|
-| macOS/Linux (curl) | `curl -fsSL https://cli.coderabbit.ai/install.sh \| sh` |
+| macOS/Linux (curl) | `curl -fsSL https://cli.coderabbit.ai/install.sh | sh` |
 | macOS (Homebrew) | `brew install --cask coderabbit` |
 
 After installing, restart your shell and verify with `coderabbit --version`. See the [CodeRabbit CLI docs](https://docs.coderabbit.ai/cli/overview).
