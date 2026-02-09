@@ -3,7 +3,7 @@ description: "Fix CodeRabbit PR review comments. Usage: /fix-coderabbit [PR#] [-
 allowed-tools: Task, Bash
 ---
 
-Delegate to the coderabbit-pr-reviewer agent. Do NOT fix code yourself.
+Auto-selects single agent or parallel coordinator based on issue count. Do NOT fix code yourself.
 
 The cr-* tools are at `${CLAUDE_PLUGIN_ROOT}/bin/`. If `${CLAUDE_PLUGIN_ROOT}` is not set, use `cr-gather` directly (assumes PATH).
 
@@ -35,24 +35,48 @@ The cr-* tools are at `${CLAUDE_PLUGIN_ROOT}/bin/`. If `${CLAUDE_PLUGIN_ROOT}` i
    - `--quick` → add "Use --quick mode (critical + major only)." to agent prompt
    - `--bg` → set `run_in_background: true` on the Task tool call
 
-5. **Auto-escalation check**: Run `${CLAUDE_PLUGIN_ROOT}/bin/cr-gather` (or `cr-gather`) first, then check issue/file counts.
-   If 5+ issues across 3+ files → tell user: "Consider using `coderabbit-coordinator` agent for parallel fixes." Still proceed with the single agent unless user cancels.
+5. **Gather and decide agent**: Run `${CLAUDE_PLUGIN_ROOT}/bin/cr-gather` (or `cr-gather`) first, then read issue/file counts from `.coderabbit-review.json`:
+
+   ```bash
+   TOTAL=$(jq '.summary.total' .coderabbit-review.json)
+   FILES=$(jq '.summary.files' .coderabbit-review.json)
+   ```
+
+   **Auto-select**:
+   - `TOTAL < 5` → use `coderabbit-pr-reviewer` (single agent, one-at-a-time fixes)
+   - `TOTAL >= 5` → use `coderabbit-coordinator` (parallel workers grouped by file)
+
+   Tell user which mode was selected: "X issues across Y files → using [single agent / parallel coordinator (up to 5 workers)]"
 
 6. **Spawn agent**:
 
+   **If single agent** (`TOTAL < 5`):
    ```
    Task:
      subagent_type: coderabbit-pr-reviewer
      run_in_background: [true if --bg, false otherwise]
      prompt: |
        Fix CodeRabbit comments on PR #[NUMBER].
-       Build command: [DETECTED_COMMAND — only the stacks that changed]
-       [If --quick: Add "Use --quick mode (critical + major only)."]
+       Build command: [DETECTED_COMMAND]
+       [If --quick: "Use --quick mode (critical + major only)."]
+       After pushing, re-gather to verify no new comments. Max 3 rounds.
+   ```
+
+   **If coordinator** (`TOTAL >= 5`):
+   ```
+   Task:
+     subagent_type: coderabbit-coordinator
+     run_in_background: [true if --bg, false otherwise]
+     prompt: |
+       Fix CodeRabbit comments on PR #[NUMBER].
+       Build command: [DETECTED_COMMAND]
+       [If --quick: "Use --quick mode (critical + major only)."]
+       Use up to 5 parallel workers. Group issues by file.
        After pushing, re-gather to verify no new comments. Max 3 rounds.
    ```
 
 7. **Report**:
-   - If foreground: issues fixed, rounds needed, PR link. Clean up: `rm -f .coderabbit-review.json`
+   - If foreground: issues fixed, rounds needed, workers used, PR link. Clean up: `rm -f .coderabbit-review.json`
    - If `--bg`: tell user the agent is running in background and provide the output file path to check progress
 
 8. **Show metrics history** (foreground only):
