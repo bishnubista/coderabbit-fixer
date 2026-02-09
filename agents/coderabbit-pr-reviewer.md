@@ -13,7 +13,7 @@ The cr-* tools are located at `${CLAUDE_PLUGIN_ROOT}/bin/`. Run them as:
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/bin/cr-gather <PR_NUMBER>
 ${CLAUDE_PLUGIN_ROOT}/bin/cr-status
-${CLAUDE_PLUGIN_ROOT}/bin/cr-next 1
+${CLAUDE_PLUGIN_ROOT}/bin/cr-next --all
 ${CLAUDE_PLUGIN_ROOT}/bin/cr-done <id>
 ${CLAUDE_PLUGIN_ROOT}/bin/cr-metrics end --builds N --commits N --rounds N
 ```
@@ -33,41 +33,62 @@ Use the build command provided in the prompt. Do NOT auto-detect — the caller 
 Set MODE: if prompt says `--quick`, use `cr-next --quick` everywhere (critical + major only).
 
 Initialize counters: `BUILDS=0`, `COMMITS=0`, `ROUNDS=0`.
-Initialize list: `FIXED_IDS=[]` (track IDs of issues you actually fixed).
 
-## Phase 2: Fix Loop
-
-Process issues ONE AT A TIME for reliability. Build and commit once per round.
+## Phase 2: Fix All → Verify Each → Build Once
 
 ```
 ROUNDS += 1
-FIXED_IDS = []
 
-WHILE cr-next 1 [--quick] returns an issue:
-  1. ${CLAUDE_PLUGIN_ROOT}/bin/cr-next 1 [--quick]   ← ONE issue only
-  2. Read the file → apply the fix
-  3. ${CLAUDE_PLUGIN_ROOT}/bin/cr-done <id>           ← mark done IMMEDIATELY
-  4. Add <id> to FIXED_IDS
-  (loop back — cr-next 1 will return the next pending issue)
+Step 1 — GET ALL ISSUES:
+  ${CLAUDE_PLUGIN_ROOT}/bin/cr-next --all [--quick]
+  Record every issue ID and its file + line from the output.
 
-After cr-next says "all fixed":
-  5. Run BUILD_CMD once → BUILDS += 1
-  6. Build passes → commit all fixes in one commit → COMMITS += 1
-     git add <changed files>
-     git commit -m "fix(pr-review): address CodeRabbit feedback on PR #<NUMBER>"
-  7. Build fails → debug, fix, re-run BUILD_CMD (BUILDS += 1), then commit
+Step 2 — FIX ALL ISSUES:
+  For each issue: read the file → apply the fix.
+  Work through them all. Do NOT call cr-done yet.
+
+Step 3 — VERIFICATION GATE (mandatory before cr-done):
+  For EVERY issue from Step 1, verify it is actually fixed:
+
+  a) Re-read the file at the relevant line
+  b) Check against the "What counts as fixed" rules below
+  c) Classify each issue:
+     - VERIFIED: fix confirmed in the file → add to VERIFIED_IDS
+     - MISSED: file was not changed or change doesn't address the comment → fix it now, then re-verify
+     - SKIPPED: intentionally not fixing (conflicts with project rules, low value refactor) → add to SKIPPED_IDS with reason
+
+  Continue until every issue is either VERIFIED or SKIPPED.
+  Log: "Verified: X fixed, Y skipped out of Z total"
+
+Step 4 — MARK DONE:
+  ${CLAUDE_PLUGIN_ROOT}/bin/cr-done <all VERIFIED_IDS>
+  (Do NOT cr-done SKIPPED_IDS — leave them as pending)
+
+Step 5 — BUILD + COMMIT:
+  Run BUILD_CMD once → BUILDS += 1
+  Build passes → COMMITS += 1:
+    git add <changed files>
+    git commit -m "fix(pr-review): address CodeRabbit feedback on PR #<NUMBER>"
+  Build fails → debug, fix, re-run BUILD_CMD (BUILDS += 1), then commit
 ```
 
-Rules:
-- **ONE issue at a time** — fetch one, fix it, mark done, fetch next. Never hold multiple issues in context.
-- cr-done IMMEDIATELY after each fix — ensures no issue is forgotten
-- Build + commit ONCE after all issues are fixed (not per issue) — this is where the speed comes from
-- Never skip — ask user if stuck
-- cr-next groups issues by file within severity, so consecutive issues often share the same file
+### What counts as fixed
 
-## Phase 3: Verify
+An issue is VERIFIED only when ALL of these are true:
+1. **File was modified** — the file mentioned in the issue has actual changes (or the issue targets a file that doesn't need changing, e.g., a type-only comment satisfied by a different file)
+2. **Change addresses the comment** — re-reading the relevant lines shows code that resolves what CodeRabbit flagged (not just nearby unrelated edits)
+3. **No regressions introduced** — the fix doesn't break the pattern expected by the comment (e.g., adding a null check that the comment asked for, not removing the code entirely)
 
-When cr-next says all fixed:
+An issue is SKIPPED (not fixed) when:
+- It conflicts with project CLAUDE.md rules
+- It's a major refactor for low-value nitpick
+- It requires architecture changes → ask user instead
+
+**NEVER call cr-done on an issue you did not verify.** If unsure whether a fix landed, re-read the file. The JSON state file is the source of truth — only IDs passed to cr-done get marked fixed.
+
+## Phase 3: Verify with CodeRabbit
+
+When all issues are verified/skipped:
 
 1. Run BUILD_CMD final time
 2. Push all commits:
