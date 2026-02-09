@@ -26,8 +26,8 @@ Internal details for contributors and advanced users.
 | Agent       |  |  Group by file             |
 | (Sonnet)    |  |  Spawn up to 5 workers     |
 |             |  |  Each worker: fix its files |
-| Fix one at  |  |  Workers report results     |
-| a time      |  +---------------------------+
+| Fix all     |  |  Workers report results     |
+| + verify    |  +---------------------------+
 +------+------+         |
        |                 v
        |         +---------------------------+
@@ -74,8 +74,9 @@ coderabbit-fixer/
 │   ├── cr-status             # Progress dashboard
 │   └── cr-metrics            # Track run timing + comparison table
 ├── docs/
-│   └── ARCHITECTURE.md       # This file
-├── install.sh                # Legacy manual installer
+│   ├── ARCHITECTURE.md       # This file
+│   └── SETUP.md              # Prerequisites, FAQ, troubleshooting
+├── install.sh                # Manual installer (plugin install is preferred)
 ├── README.md
 └── LICENSE
 ```
@@ -86,7 +87,7 @@ coderabbit-fixer/
 |-----------|------|------|
 | `/fix-coderabbit` | Slash command | Auto-selects agent, detects build command |
 | `/coderabbit-review` | Slash command | Local review via CodeRabbit CLI |
-| `coderabbit-pr-reviewer` | Agent (Sonnet) | Single-agent fix loop with verification gate |
+| `coderabbit-pr-reviewer` | Agent (Sonnet) | Fixes all issues + verification gate, one build + commit |
 | `coderabbit-coordinator` | Agent (Sonnet) | Parallel orchestrator: groups by file, spawns up to 5 workers |
 | `cr-gather` | CLI tool | Fetches + classifies CodeRabbit comments, records start time |
 | `cr-next` | CLI tool | Returns next batch (file-grouped, severity-filtered) |
@@ -98,7 +99,7 @@ coderabbit-fixer/
 
 | Condition | Agent | Reason |
 |-----------|-------|--------|
-| < 5 issues | `coderabbit-pr-reviewer` | Single agent, low overhead, verification gate |
+| < 5 issues | `coderabbit-pr-reviewer` | Single agent, fixes all + verification gate, one build + commit |
 | >= 5 issues | `coderabbit-coordinator` | Parallel workers (max 5), grouped by file |
 
 ## Parallel Worker Safety

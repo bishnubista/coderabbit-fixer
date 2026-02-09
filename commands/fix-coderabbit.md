@@ -43,7 +43,7 @@ The cr-* tools are at `${CLAUDE_PLUGIN_ROOT}/bin/`. If `${CLAUDE_PLUGIN_ROOT}` i
    ```
 
    **Auto-select**:
-   - `TOTAL < 5` → use `coderabbit-pr-reviewer` (single agent, one-at-a-time fixes)
+   - `TOTAL < 5` → use `coderabbit-pr-reviewer` (single agent, verification gate)
    - `TOTAL >= 5` → use `coderabbit-coordinator` (parallel workers grouped by file)
 
    Tell user which mode was selected: "X issues across Y files → using [single agent / parallel coordinator (up to 5 workers)]"
