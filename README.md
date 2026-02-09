@@ -10,50 +10,48 @@ CodeRabbit leaves great review comments — but fixing them is painful:
 - **Tedious iteration** — 15 comments = open each one, understand it, edit the file, repeat for 30-60 minutes.
 - **No accountability** — No way to know how many were actually fixed vs. skipped until you check yourself.
 
-## The Solution
+## Quick Start
+
+**Prerequisites:** [Claude Code](https://code.claude.com/) + [CodeRabbit GitHub App](https://github.com/apps/coderabbitai) on your repo + `gh` and `jq` (`brew install gh jq`)
+
+**Step 1** — Install the plugin (run inside Claude Code):
+
+```bash
+/plugin install https://github.com/bishnubista/coderabbit-fixer
+```
+
+**Step 2** — Open a PR that has CodeRabbit review comments, then run:
 
 ```bash
 /fix-coderabbit
 ```
 
-One command. Every comment gets fixed, verified, and resolved.
+That's it. It gathers all comments, fixes them, verifies every fix, resolves the GitHub threads, and pushes.
+
+## How It Works
 
 - **Verification gate** — After fixing, re-reads every file to confirm each fix actually landed. Only verified fixes get marked done.
-- **Parallel workers** — 5+ issues triggers up to 5 sub-agents, each owning a file group. Same-file issues always go to the same worker.
+- **Auto-scales** — < 5 issues uses a single agent. >= 5 issues spawns up to 5 parallel workers, each owning a file group.
 - **Metrics** — `cr-metrics show` tracks fixed/total across runs so you can see if anything was missed.
 
-## Install
+## More Options
 
 ```bash
-# Claude Code plugin (recommended):
-/plugin install https://github.com/bishnubista/coderabbit-fixer
+/fix-coderabbit 71           # Fix issues on specific PR
+/fix-coderabbit --quick      # Critical + major only (skip nitpicks)
+/fix-coderabbit --bg         # Run in background
+/coderabbit-review           # Local review before pushing (needs CodeRabbit CLI)
+```
 
-# Manual:
+<details>
+<summary>Manual install (without plugin system)</summary>
+
+```bash
 git clone https://github.com/bishnubista/coderabbit-fixer.git
 cd coderabbit-fixer && ./install.sh
 ```
 
-Requires: [Claude Code](https://code.claude.com/), [`gh`](https://cli.github.com/), [`jq`](https://jqlang.github.io/jq/), [CodeRabbit GitHub App](https://github.com/apps/coderabbitai). See [docs/SETUP.md](docs/SETUP.md) for install details.
-
-## Usage
-
-```bash
-/fix-coderabbit              # Fix all issues on current PR
-/fix-coderabbit 71           # Fix issues on PR #71
-/fix-coderabbit --quick      # Critical + major only
-/fix-coderabbit --bg         # Run in background
-```
-
-Auto-selects the right strategy:
-
-| Issues | Strategy |
-|--------|----------|
-| < 5 | Single agent, one-at-a-time fixes, verification gate |
-| >= 5 | Parallel workers grouped by file, orchestrator verifies all |
-
-```bash
-/coderabbit-review           # Local review before pushing (needs CodeRabbit CLI)
-```
+</details>
 
 ## Docs
 
@@ -63,7 +61,3 @@ Auto-selects the right strategy:
 ## License
 
 MIT
-
----
-
-**Version:** 1.1.0 | **Author:** [Bishnu Bista](https://github.com/bishnubista)
