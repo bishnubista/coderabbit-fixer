@@ -1,6 +1,29 @@
 # CodeRabbit Fixer
 
-Claude Code plugin that automatically fixes [CodeRabbit](https://www.coderabbit.ai/) PR review comments. Gathers comments, classifies by severity, fixes in batches with build validation, resolves GitHub threads, and pushes — from a single command.
+Claude Code plugin that automatically fixes [CodeRabbit](https://www.coderabbit.ai/) PR review comments. From a single command: gathers comments, classifies by severity, fixes with build validation, verifies every fix, resolves GitHub threads, and pushes.
+
+## The Problem
+
+CodeRabbit reviews your PRs and leaves detailed comments — but fixing them is a manual grind:
+
+1. **Tedious iteration** — Open each comment, understand the suggestion, edit the file, repeat. A PR with 15 comments takes 30-60 minutes of mechanical work.
+2. **AI agents forget fixes** — When you ask Claude Code to fix CodeRabbit comments, it processes some and silently skips others. You end up manually checking every comment to verify it was actually addressed.
+3. **Slow feedback loop** — Fix, push, wait for CodeRabbit to re-review, find new comments, repeat. Each round takes 3-5 minutes of waiting.
+4. **No visibility** — There's no easy way to see how many issues were fixed vs. skipped, or track performance across runs.
+
+## The Solution
+
+CodeRabbit Fixer turns the entire fix cycle into one command:
+
+```bash
+/fix-coderabbit
+```
+
+**How it prevents forgotten fixes:**
+- **Verification gate** — After fixing, the agent re-reads every file to confirm each fix actually landed. Issues are classified as VERIFIED, MISSED, or SKIPPED. Only verified fixes get marked as done.
+- **Structured state tracking** — A JSON state file tracks every issue by ID. `cr-done` is only called on issues that pass verification. Nothing slips through.
+- **Parallel workers for large PRs** — 5+ issues automatically triggers parallel sub-agents, each owning a file group. Same-file issues always go to the same worker (no conflicts, no context overload).
+- **Metrics across runs** — `cr-metrics show` displays a comparison table so you can see fixed/total ratio and catch regressions.
 
 ## Commands
 
@@ -16,7 +39,14 @@ Fetches all CodeRabbit comments from a PR, then autonomously fixes them with bui
 /fix-coderabbit 71 --quick --bg  # Combine flags
 ```
 
-**What happens:** Gathers comments via GitHub API, classifies severity (critical > major > minor > nitpick), fixes 2 issues per batch, validates build after each batch, commits incrementally, pushes and re-checks (max 3 rounds).
+**What happens:**
+
+| Issues | Agent | Strategy |
+|--------|-------|----------|
+| < 5 | `coderabbit-pr-reviewer` | Single agent, fixes one at a time, verification gate, one build + commit |
+| >= 5 | `coderabbit-coordinator` | Groups by file, spawns up to 5 parallel workers, orchestrator verifies all, one build + commit |
+
+After pushing, waits for CodeRabbit to re-review and fixes new comments (max 3 rounds). Shows metrics history at the end.
 
 ### `/coderabbit-review` — Local Review Before Pushing
 
@@ -33,10 +63,10 @@ Requires the CodeRabbit CLI (optional dependency). See [How do I install the Cod
 
 ## Agents
 
-| Agent | Description |
-|-------|-------------|
-| `coderabbit-pr-reviewer` | Autonomous fix loop — reads issues, applies fixes, validates build, commits in batches of 2 |
-| `coderabbit-coordinator` | Orchestrates parallel sub-agents for large PRs (5+ issues across 3+ files) |
+| Agent | When | Strategy |
+|-------|------|----------|
+| `coderabbit-pr-reviewer` | < 5 issues | Single agent fixes one-at-a-time with verification gate |
+| `coderabbit-coordinator` | >= 5 issues | Spawns up to 5 parallel workers grouped by file, orchestrator verifies all fixes |
 
 ## Installation
 
@@ -74,13 +104,28 @@ which claude            # Claude Code installed
 
 ## Features
 
+- **Verification gate** — re-reads every file after fixing to confirm each change actually landed. Only verified fixes get marked done.
+- **Parallel workers** — 5+ issues triggers the coordinator, which spawns up to 5 sub-agents grouped by file. Same-file issues always go to the same worker.
 - **Smart build detection** — detects which stack changed (backend/frontend) and only validates what's needed. Supports `uv`, `bun`, `pnpm`, `npm`.
 - **Severity classification** — critical, major, minor, nitpick. Use `--quick` to fix only critical + major.
-- **File grouping** — related issues in the same file are fixed together for fewer context switches.
+- **Metrics tracking** — `cr-metrics show` displays a comparison table across runs with timing, fix counts, and trends.
+- **File grouping** — issues in the same file are processed together for fewer context switches.
 - **GitHub thread resolution** — resolved threads show green checkmarks immediately via GraphQL API.
-- **Per-batch commits** — commits after every 2 fixes for safe partial rollback.
-- **Auto-escalation** — suggests the coordinator agent when 5+ issues span 3+ files.
+- **Auto-selection** — `/fix-coderabbit` picks the right agent (single vs. parallel) based on issue count.
 - **Pagination** — handles PRs with 100+ review threads without truncation.
+
+## CLI Tools
+
+Standalone tools for manual use or scripting:
+
+```bash
+cr-gather 71                    # Fetch all CodeRabbit comments
+cr-status                       # Progress dashboard
+cr-next --all                   # See all pending issues
+cr-done thread-123 thread-456   # Mark issues as fixed
+cr-metrics show --pr 71         # Compare runs for a PR
+cr-metrics reset                # Clear metrics history
+```
 
 ## FAQ
 
@@ -103,7 +148,7 @@ Optional — only needed for `/coderabbit-review` (local review). The main `/fix
 
 | Platform | Command |
 |----------|---------|
-| macOS/Linux (curl) | `curl -fsSL https://cli.coderabbit.ai/install.sh &#124; sh` |
+| macOS/Linux (curl) | `curl -fsSL https://cli.coderabbit.ai/install.sh \| sh` |
 | macOS (Homebrew) | `brew install --cask coderabbit` |
 
 After installing, restart your shell and verify with `coderabbit --version`. See the [CodeRabbit CLI docs](https://docs.coderabbit.ai/cli/overview).
@@ -165,4 +210,4 @@ MIT
 
 ---
 
-**Version:** 1.0.0 | **Author:** [Bishnu Bista](https://github.com/bishnubista)
+**Version:** 1.1.0 | **Author:** [Bishnu Bista](https://github.com/bishnubista)
