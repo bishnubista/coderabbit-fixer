@@ -1,3 +1,5 @@
 .coderabbit-review.json
 .DS_Store
 *.bak
+__pycache__/
+*.pyc

@@ -17,6 +17,13 @@ CodeRabbit leaves great review comments — but fixing them is painful:
 **Step 1** — Install the plugin (run inside Claude Code):
 
 ```bash
+/plugin marketplace add bishnubista/coderabbit-fixer
+/plugin install coderabbit-fixer@bishnubista
+```
+
+If your Claude Code version does not support marketplaces yet, use:
+
+```bash
 /plugin install https://github.com/bishnubista/coderabbit-fixer
 ```
 
@@ -41,6 +48,7 @@ That's it. It gathers all comments, fixes them, verifies every fix, resolves the
 /fix-coderabbit --quick      # Critical + major only (skip nitpicks)
 /fix-coderabbit --bg         # Run in background
 /coderabbit-review           # Local review before pushing (needs CodeRabbit CLI)
+/coderabbit-review committed --base main
 ```
 
 <details>
@@ -53,10 +61,42 @@ cd coderabbit-fixer && ./install.sh
 
 </details>
 
+## Runtime
+
+`cr-*` commands support three runtimes with install-time selection:
+- `python` (default)
+- `bash`
+- `bun`
+
+Manual install defaults to Python:
+
+```bash
+./install.sh
+```
+
+Choose explicitly:
+
+```bash
+./install.sh --runtime python
+./install.sh --runtime bash
+./install.sh --runtime bun
+```
+
+One-off override without reinstall:
+
+```bash
+CR_IMPL=bash cr-next
+CR_IMPL=bun cr-next
+```
+
 ## Docs
 
 - [Setup, FAQ & Troubleshooting](docs/SETUP.md)
 - [Architecture & Internals](docs/ARCHITECTURE.md)
+- [Contributing Guide](CONTRIBUTING.md)
+- [Security Policy](SECURITY.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Changelog](CHANGELOG.md)
 
 ## License
 

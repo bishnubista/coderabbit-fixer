@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+#
+# cr-status - Show CodeRabbit review progress
+#
+# Usage:
+#   cr-status          # Show summary
+#   cr-status --full   # Show all issues with details
+#   cr-status --json   # Output raw JSON
+#
+set -euo pipefail
+
+STATE_FILE=".coderabbit-review.json"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+die() {
+  echo -e "${RED}ERROR: $1${NC}" >&2
+  exit 1
+}
+usage() {
+  cat <<'EOF'
+Usage:
+  cr-status
+  cr-status --full
+  cr-status --json
+EOF
+}
+
+# Check state file exists
+if [[ ! -f "$STATE_FILE" ]]; then
+  echo -e "${YELLOW}No state file found.${NC}"
+  echo "Run: cr-gather <PR_NUMBER>"
+  exit 1
+fi
+
+# Parse arguments
+FULL=false
+JSON=false
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --full) FULL=true; shift ;;
+    --json) JSON=true; shift ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    -*)
+      die "Unknown flag: $1"
+      ;;
+    *)
+      die "Unexpected argument: $1"
+      ;;
+  esac
+done
+
+# JSON output mode
+if [[ "$JSON" == "true" ]]; then
+  cat "$STATE_FILE"
+  exit 0
+fi
+
+# Get metadata
+REPO=$(jq -r '.repository' "$STATE_FILE")
+PR=$(jq -r '.pr_number' "$STATE_FILE")
+GATHERED=$(jq -r '.gathered_at' "$STATE_FILE")
+
+# Get counts
+TOTAL=$(jq '.issues | length' "$STATE_FILE")
+FIXED=$(jq '[.issues[] | select(.status == "fixed")] | length' "$STATE_FILE")
+PENDING=$((TOTAL - FIXED))
+
+# Severity counts (from pending only) — uses severity field
+CRITICAL=$(jq '[.issues[] | select(.status == "pending" and .severity == "critical")] | length' "$STATE_FILE")
+MAJOR=$(jq '[.issues[] | select(.status == "pending" and .severity == "major")] | length' "$STATE_FILE")
+MINOR=$(jq '[.issues[] | select(.status == "pending" and .severity == "minor")] | length' "$STATE_FILE")
+NITPICK=$(jq '[.issues[] | select(.status == "pending" and (.severity == "nitpick" or .type == "nitpick"))] | length' "$STATE_FILE")
+
+# File count
+FILE_COUNT=$(jq '[.issues[] | select(.status == "pending" and .file != null) | .file] | unique | length' "$STATE_FILE")
+
+# Print header
+echo "═══════════════════════════════════════════════════════════"
+echo -e "  ${CYAN}CODERABBIT REVIEW STATUS${NC}"
+echo "═══════════════════════════════════════════════════════════"
+echo ""
+echo "  Repository:  $REPO"
+echo "  PR:          #$PR"
+echo "  Gathered:    $GATHERED"
+echo ""
+
+# Progress bar
+PCT=0
+[[ "$TOTAL" -gt 0 ]] && PCT=$((FIXED * 100 / TOTAL))
+BAR_WIDTH=30
+FILLED=$((PCT * BAR_WIDTH / 100))
+EMPTY=$((BAR_WIDTH - FILLED))
+BAR=$(printf "%${FILLED}s" | tr ' ' '█')$(printf "%${EMPTY}s" | tr ' ' '░')
+
+echo -e "  Progress:    [${GREEN}${BAR}${NC}] $PCT%"
+echo "               $FIXED/$TOTAL fixed ($PENDING remaining across $FILE_COUNT files)"
+echo ""
+echo "  ┌─────────────────────────────"
+echo "  │ 🔴 Critical: $CRITICAL"
+echo "  │ 🟠 Major:    $MAJOR"
+echo "  │ 🟡 Minor:    $MINOR"
+echo "  │ 💬 Nitpick:  $NITPICK"
+echo "  └─────────────────────────────"
+echo ""
+
+# Full listing if requested — grouped by file
+if [[ "$FULL" == "true" ]]; then
+  echo "═══════════════════════════════════════════════════════════"
+  echo "  ALL ISSUES (grouped by file)"
+  echo "═══════════════════════════════════════════════════════════"
+  echo ""
+
+  jq -r '
+    .issues
+    | group_by(.file // "general")
+    | .[]
+    | "📁 " + (.[0].file // "general") + " (" + (length | tostring) + " issues)" + "\n" +
+      ([.[] |
+        (if .status == "fixed" then "  ✅" else "  ⏳" end) + " " +
+        "[" + .id + "] [" + .severity + "] " +
+        (.body | split("\n")[0] | .[0:70]) + "..."
+      ] | join("\n")) + "\n"
+  ' "$STATE_FILE"
+
+  echo ""
+fi
+
+# Next steps
+if [[ "$PENDING" -eq 0 ]]; then
+  echo -e "${GREEN}🎉 All issues resolved!${NC}"
+  echo ""
+  echo "Next steps:"
+  echo "  1. Run validation"
+  echo "  2. git commit && git push"
+else
+  echo "Commands:"
+  echo "  cr-next       # Get next issues to fix (grouped by file)"
+  echo "  cr-next --quick  # Critical + major only"
+  echo "  cr-done <id>  # Mark issue as fixed + resolve GitHub thread"
+  echo "  cr-gather $PR  # Refresh from GitHub"
+fi

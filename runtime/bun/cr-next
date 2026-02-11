@@ -1,0 +1,208 @@
+#!/usr/bin/env bun
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+const STATE_FILE = ".coderabbit-review.json";
+const RED = "\x1b[0;31m";
+const GREEN = "\x1b[0;32m";
+const NC = "\x1b[0m";
+
+function usage() {
+  console.log("Usage:");
+  console.log("  cr-next [N]");
+  console.log("  cr-next --quick");
+  console.log("  cr-next --all");
+  console.log("  cr-next --brief");
+}
+
+function die(message) {
+  console.error(`${RED}ERROR: ${message}${NC}`);
+  console.error("Run: cr-gather <PR>");
+  process.exit(1);
+}
+
+function parseArgs(argv) {
+  let count = 2;
+  let allMode = false;
+  let quick = false;
+  let brief = false;
+  let countSet = false;
+
+  for (const arg of argv) {
+    if (arg === "--all") {
+      allMode = true;
+      continue;
+    }
+    if (arg === "--quick") {
+      quick = true;
+      continue;
+    }
+    if (arg === "--brief") {
+      brief = true;
+      continue;
+    }
+    if (arg === "--help" || arg === "-h") {
+      usage();
+      process.exit(0);
+    }
+    if (arg.startsWith("-")) {
+      die(`Unknown flag: ${arg}`);
+    }
+    if (!/^\d+$/.test(arg)) {
+      die(`Invalid argument: ${arg}`);
+    }
+    if (countSet) {
+      die("Count provided multiple times");
+    }
+    count = Number(arg);
+    countSet = true;
+  }
+
+  if (count < 1) {
+    die("Count must be >= 1");
+  }
+
+  return { count, allMode, quick, brief };
+}
+
+function readState() {
+  if (!existsSync(STATE_FILE)) {
+    die("State file not found");
+  }
+  try {
+    return JSON.parse(readFileSync(STATE_FILE, "utf-8"));
+  } catch (err) {
+    die(`Invalid state JSON: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function writeState(state) {
+  const tmpPath = join(".", `.coderabbit-review.${process.pid}.${Date.now()}.json`);
+  writeFileSync(tmpPath, `${JSON.stringify(state, null, 2)}\n`, "utf-8");
+  renameSync(tmpPath, STATE_FILE);
+}
+
+function nowUtc() {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function recordLastShown(state, ids) {
+  if (!state.session || typeof state.session !== "object") {
+    state.session = {};
+  }
+  state.session.last_shown_ids = ids;
+  state.session.last_shown_at = nowUtc();
+  writeState(state);
+}
+
+function severityRank(issue) {
+  switch (issue?.severity) {
+    case "critical":
+      return 0;
+    case "major":
+      return 1;
+    case "minor":
+      return 2;
+    case "nitpick":
+      return 3;
+    default:
+      return 4;
+  }
+}
+
+function issueFileKey(issue) {
+  return typeof issue?.file === "string" && issue.file.length > 0 ? issue.file : "zzz";
+}
+
+function getPending(issues, quick) {
+  let pending = issues.filter((i) => i?.status === "pending");
+  if (quick) {
+    pending = pending.filter((i) => i?.severity === "critical" || i?.severity === "major");
+  }
+  return pending;
+}
+
+function renderIssue(issue, brief) {
+  const id = issue?.id ?? "N/A";
+  const severity = issue?.severity ?? "other";
+  const file = issue?.file ?? "N/A";
+  const line = issue?.line ?? "N/A";
+  const url = issue?.url;
+  let body = typeof issue?.body === "string" ? issue.body : String(issue?.body ?? "");
+
+  if (brief && body.length > 500) {
+    body = `${body.slice(0, 500)}\n\n...[truncated]`;
+  }
+
+  let out = `## [${id}] [${severity}]\n`;
+  out += `**File:** ${file} | **Line:** ${line}\n`;
+  if (url) {
+    out += `**URL:** ${url}\n`;
+  }
+  out += `\n${body}\n\n---\n\n`;
+  return out;
+}
+
+function main(argv) {
+  const { count, allMode, quick, brief } = parseArgs(argv);
+  const state = readState();
+
+  const issues = Array.isArray(state.issues) ? state.issues.filter((i) => i && typeof i === "object") : [];
+  const total = issues.length;
+  const fixed = issues.filter((i) => i.status === "fixed").length;
+  const pendingCount = quick ? getPending(issues, true).length : total - fixed;
+
+  if (pendingCount === 0) {
+    recordLastShown(state, []);
+    if (quick) {
+      const skipped = total - fixed;
+      console.log(`${GREEN}All critical/major issues fixed!${NC} (${skipped} minor/nitpick skipped)`);
+    } else {
+      console.log(`${GREEN}All ${total} issues fixed!${NC}`);
+    }
+    console.log("Next: validate, commit, push, then cr-gather to verify no new comments.");
+    return;
+  }
+
+  const sorted = getPending(issues, quick).sort((a, b) => {
+    const rankDiff = severityRank(a) - severityRank(b);
+    if (rankDiff !== 0) return rankDiff;
+    return issueFileKey(a).localeCompare(issueFileKey(b));
+  });
+  const selected = allMode ? sorted : sorted.slice(0, count);
+
+  if (selected.length === 0) {
+    recordLastShown(state, []);
+    if (quick) {
+      console.log(`${GREEN}No critical/major issues remaining.${NC}`);
+      console.log("Run cr-next without --quick to see minor/nitpick issues.");
+    } else {
+      console.log(`${GREEN}All ${total} issues fixed!${NC}`);
+    }
+    return;
+  }
+
+  recordLastShown(
+    state,
+    selected.map((i) => i.id).filter((id) => typeof id === "string" && id.length > 0),
+  );
+
+  const files = Array.from(new Set(selected.map((i) => (i.file ?? "general")))).sort((a, b) =>
+    String(a).localeCompare(String(b)),
+  );
+  const filesList = files.join(", ");
+
+  console.log(`# CodeRabbit Issues (${fixed}/${total} fixed, ${pendingCount} remaining)`);
+  if (quick) {
+    console.log("Mode: --quick (critical + major only)");
+  }
+  console.log(`Files in this batch: ${filesList} (${files.length} file(s))`);
+  console.log("");
+
+  for (const issue of selected) {
+    process.stdout.write(renderIssue(issue, brief));
+  }
+  console.log("Fix then run: cr-done <id1> [id2...]");
+}
+
+main(process.argv.slice(2));

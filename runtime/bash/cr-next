@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+#
+# cr-next - Get next N pending CodeRabbit issues
+#
+# Usage:
+#   cr-next [N]        # Next N issues, all severities (default: 2)
+#   cr-next --quick    # Only CRITICAL + MAJOR issues
+#   cr-next --all      # All pending at once
+#   cr-next --brief    # Truncate long bodies (500 chars)
+#
+# Issues are grouped by file within severity tier for fewer context switches.
+#
+set -euo pipefail
+
+STATE_FILE=".coderabbit-review.json"
+RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+
+die() { echo -e "${RED}ERROR: $1${NC}" >&2; echo "Run: cr-gather <PR>" >&2; exit 1; }
+usage() {
+  cat <<'EOF'
+Usage:
+  cr-next [N]
+  cr-next --quick
+  cr-next --all
+  cr-next --brief
+EOF
+}
+record_last_shown() {
+  local ids_json="$1"
+  local tmp_file
+  tmp_file=$(mktemp)
+  jq --argjson ids "$ids_json" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+    .session.last_shown_ids = $ids |
+    .session.last_shown_at = $ts
+  ' "$STATE_FILE" > "$tmp_file" && mv "$tmp_file" "$STATE_FILE"
+}
+
+[[ -f "$STATE_FILE" ]] || die "State file not found"
+
+# Parse arguments
+COUNT=2
+ALL=false
+QUICK=false
+BRIEF=false
+COUNT_SET=false
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --all) ALL=true; shift ;;
+    --quick) QUICK=true; shift ;;
+    --brief) BRIEF=true; shift ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    -*)
+      die "Unknown flag: $1"
+      ;;
+    *)
+      if [[ "$1" =~ ^[0-9]+$ ]]; then
+        if [[ "$COUNT_SET" == "true" ]]; then
+          die "Count provided multiple times"
+        fi
+        COUNT="$1"
+        COUNT_SET=true
+        shift
+      else
+        die "Invalid argument: $1"
+      fi
+      ;;
+  esac
+done
+
+[[ "$COUNT" -ge 1 ]] || die "Count must be >= 1"
+
+TOTAL=$(jq '.issues | length' "$STATE_FILE")
+FIXED=$(jq '[.issues[] | select(.status == "fixed")] | length' "$STATE_FILE")
+
+# Build severity filter using the severity field (not emoji regex)
+if [[ "$QUICK" == "true" ]]; then
+  SEVERITY_FILTER='select(.severity == "critical" or .severity == "major")'
+  PENDING=$(jq "[.issues[] | select(.status == \"pending\") | $SEVERITY_FILTER] | length" "$STATE_FILE")
+else
+  SEVERITY_FILTER=''
+  PENDING=$((TOTAL - FIXED))
+fi
+
+# All done?
+if [[ "$PENDING" -eq 0 ]]; then
+  record_last_shown '[]'
+  if [[ "$QUICK" == "true" ]]; then
+    SKIPPED=$((TOTAL - FIXED))
+    echo -e "${GREEN}All critical/major issues fixed!${NC} ($SKIPPED minor/nitpick skipped)"
+  else
+    echo -e "${GREEN}All $TOTAL issues fixed!${NC}"
+  fi
+  echo "Next: validate, commit, push, then cr-gather to verify no new comments."
+  exit 0
+fi
+
+# Get issues — sorted by severity then grouped by file
+if [[ -n "$SEVERITY_FILTER" ]]; then
+  JQ_FULL="[.issues[] | select(.status == \"pending\") | $SEVERITY_FILTER]"
+else
+  JQ_FULL='[.issues[] | select(.status == "pending")]'
+fi
+
+# Group by file within severity: sort by (severity_rank, file) so same-file issues are adjacent
+SORTED_ISSUES=$(jq "$JQ_FULL"' | sort_by(
+  (if .severity == "critical" then 0
+   elif .severity == "major" then 1
+   elif .severity == "minor" then 2
+   elif .severity == "nitpick" then 3
+   else 4 end),
+  (.file // "zzz")
+)' "$STATE_FILE")
+
+if [[ "$ALL" == "true" ]]; then
+  ISSUES="$SORTED_ISSUES"
+else
+  ISSUES=$(echo "$SORTED_ISSUES" | jq --argjson n "$COUNT" '.[:$n]')
+fi
+
+ISSUE_COUNT=$(echo "$ISSUES" | jq 'length')
+
+if [[ "$ISSUE_COUNT" -eq 0 ]]; then
+  record_last_shown '[]'
+  if [[ "$QUICK" == "true" ]]; then
+    echo -e "${GREEN}No critical/major issues remaining.${NC}"
+    echo "Run cr-next without --quick to see minor/nitpick issues."
+  else
+    echo -e "${GREEN}All $TOTAL issues fixed!${NC}"
+  fi
+  exit 0
+fi
+
+# Store exactly what was shown so `cr-done --last` can act on the latest batch.
+record_last_shown "$(echo "$ISSUES" | jq '[.[].id]')"
+
+# Show file grouping info
+FILE_COUNT=$(echo "$ISSUES" | jq '[.[].file // "general"] | unique | length')
+FILES_LIST=$(echo "$ISSUES" | jq -r '[.[].file // "general"] | unique | join(", ")')
+
+# Output header
+echo "# CodeRabbit Issues ($FIXED/$TOTAL fixed, $PENDING remaining)"
+[[ "$QUICK" == "true" ]] && echo "Mode: --quick (critical + major only)"
+echo "Files in this batch: $FILES_LIST ($FILE_COUNT file(s))"
+echo ""
+
+if [[ "$BRIEF" == "true" ]]; then
+  echo "$ISSUES" | jq -r '
+    to_entries[] |
+    "## [\(.value.id)] [\(.value.severity)]\n" +
+    "**File:** \(.value.file // "N/A") | **Line:** \(.value.line // "N/A")\n" +
+    (if .value.url then "**URL:** \(.value.url)\n" else "" end) +
+    "\n\(.value.body | if length > 500 then .[:500] + "\n\n...[truncated]" else . end)\n\n---\n"
+  '
+else
+  echo "$ISSUES" | jq -r '
+    to_entries[] |
+    "## [\(.value.id)] [\(.value.severity)]\n" +
+    "**File:** \(.value.file // "N/A") | **Line:** \(.value.line // "N/A")\n" +
+    (if .value.url then "**URL:** \(.value.url)\n" else "" end) +
+    "\n\(.value.body)\n\n---\n"
+  '
+fi
+
+echo "Fix then run: cr-done <id1> [id2...]"

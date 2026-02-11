@@ -59,6 +59,7 @@ Internal details for contributors and advanced users.
 
 ```text
 coderabbit-fixer/
+├── marketplace.json          # Optional Claude plugin marketplace manifest
 ├── .claude-plugin/
 │   └── plugin.json           # Plugin manifest (name, version, keywords)
 ├── commands/
@@ -68,11 +69,21 @@ coderabbit-fixer/
 │   ├── coderabbit-pr-reviewer.md  # Single-agent fixer (< 5 issues)
 │   └── coderabbit-coordinator.md  # Parallel orchestrator (>= 5 issues)
 ├── bin/
-│   ├── cr-gather             # Fetch + classify CodeRabbit comments
-│   ├── cr-next               # Return next batch (file-grouped, severity-filtered)
-│   ├── cr-done               # Mark fixed + resolve GitHub threads
-│   ├── cr-status             # Progress dashboard
-│   └── cr-metrics            # Track run timing + comparison table
+│   ├── _cr_dispatch.sh       # Runtime selector (python default, bash/bun optional)
+│   ├── cr-gather             # Dispatcher entrypoint
+│   ├── cr-next               # Dispatcher entrypoint
+│   ├── cr-done               # Dispatcher entrypoint
+│   ├── cr-status             # Dispatcher entrypoint
+│   └── cr-metrics            # Dispatcher entrypoint
+├── runtime/
+│   ├── bash/                 # Primary implementations
+│   │   ├── cr-gather
+│   │   ├── cr-next
+│   │   ├── cr-done
+│   │   ├── cr-status
+│   │   └── cr-metrics
+│   ├── python/               # Python runtime implementations (cr-next/cr-done native; others delegate)
+│   └── bun/                  # Bun runtime implementations (cr-next/cr-done native; others delegate)
 ├── docs/
 │   ├── ARCHITECTURE.md       # This file
 │   └── SETUP.md              # Prerequisites, FAQ, troubleshooting
@@ -94,6 +105,21 @@ coderabbit-fixer/
 | `cr-done` | CLI tool | Marks fixed + resolves GitHub threads |
 | `cr-status` | CLI tool | Progress dashboard |
 | `cr-metrics` | CLI tool | Track run timing, comparison table, trends |
+
+## Runtime Dispatch
+
+`bin/cr-*` commands are dispatchers. Runtime is chosen in this order:
+
+1. `CR_IMPL` environment variable
+2. `~/.config/coderabbit-fixer/runtime` (written by `install.sh --runtime ...`)
+3. Default: `python`
+
+Supported runtime values:
+- `python`
+- `bash`
+- `bun`
+
+If the chosen runtime is unavailable, dispatch falls back to Bash.
 
 ## Agent Selection
 
@@ -137,7 +163,7 @@ cr-next --all           # All pending issues
 cr-next --brief         # Truncated output (500 chars)
 
 cr-done thread-123 thread-456   # Mark specific issues as fixed + resolve threads
-cr-done --last 2                # Mark last 2 shown issues
+cr-done --last 2                # Mark first 2 IDs from latest cr-next output
 cr-done --no-resolve            # Skip GitHub thread resolution
 
 cr-metrics end --builds 1 --commits 1 --rounds 1   # Log a completed run
@@ -198,11 +224,13 @@ Run history is stored in `~/.coderabbit-metrics.jsonl` (one JSON object per line
 
 ## Severity Classification
 
-Issues are classified at gather time into four severity tiers:
+`cr-gather` normalizes CodeRabbit labels into four operational tiers:
 
-| Severity | Meaning | Examples |
-|----------|---------|---------|
-| `critical` | Security vulnerabilities, data loss risks | SQL injection, missing auth checks |
-| `major` | Bugs, missing error handling, logic errors | Unhandled exceptions, race conditions |
-| `minor` | Code quality, inconsistencies | Missing types, naming conventions |
-| `nitpick` | Style, minor suggestions | Formatting, comment wording |
+| CodeRabbit label | Internal bucket |
+|------------------|-----------------|
+| `critical` | `critical` |
+| `major`, `high` | `major` |
+| `minor`, `medium` | `minor` |
+| `trivial`, `info`, `low`, `nitpick` | `nitpick` |
+
+This keeps prioritization stable even when CodeRabbit wording varies across formats.

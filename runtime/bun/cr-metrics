@@ -1,0 +1,4 @@
+#!/usr/bin/env bun
+import { main } from "./_dispatch.mjs";
+
+main(import.meta.url);

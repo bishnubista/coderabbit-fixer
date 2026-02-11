@@ -3,7 +3,8 @@
 # install.sh - Install Claude Code x CodeRabbit plugin
 #
 # Usage:
-#   ./install.sh             # Install all components
+#   ./install.sh                       # Install all components (default runtime: python)
+#   ./install.sh --runtime <python|bash|bun>
 #   ./install.sh --uninstall # Remove all components
 #
 set -euo pipefail
@@ -14,13 +15,57 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="${HOME}/.local/bin"
 COMMANDS_DIR="${HOME}/.claude/commands"
 AGENTS_DIR="${HOME}/.claude/agents"
+SHARE_DIR="${HOME}/.local/share/coderabbit-fixer"
+RUNTIME_DIR="${SHARE_DIR}/runtime"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/coderabbit-fixer"
+RUNTIME_CONFIG="${CONFIG_DIR}/runtime"
+
+die() {
+  echo -e "${RED}ERROR: $1${NC}" >&2
+  exit 1
+}
+usage() {
+  cat <<'EOF'
+Usage:
+  ./install.sh
+  ./install.sh --runtime <python|bash|bun>
+  ./install.sh --uninstall
+EOF
+}
+
+# Parse arguments
+UNINSTALL=false
+RUNTIME="python"
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --uninstall)
+      UNINSTALL=true
+      shift
+      ;;
+    --runtime)
+      [[ $# -ge 2 ]] || die "--runtime requires one of: python | bash | bun"
+      case "$2" in
+        python|bash|bun) RUNTIME="$2" ;;
+        *) die "Invalid runtime '$2'. Use: python | bash | bun" ;;
+      esac
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      die "Unknown argument: $1"
+      ;;
+  esac
+done
 
 # ── Uninstall ──────────────────────────────────────────────────────────────
-if [[ "${1:-}" == "--uninstall" ]]; then
+if [[ "$UNINSTALL" == "true" ]]; then
   echo -e "${CYAN}Uninstalling Claude Code x CodeRabbit plugin...${NC}"
   echo ""
 
-  for tool in cr-gather cr-status cr-next cr-done cr-metrics; do
+  for tool in cr-gather cr-status cr-next cr-done cr-metrics _cr_dispatch.sh; do
     if [[ -f "$BIN_DIR/$tool" ]]; then
       rm -f "$BIN_DIR/$tool"
       echo -e "  ${RED}✗${NC} Removed $BIN_DIR/$tool"
@@ -40,6 +85,16 @@ if [[ "${1:-}" == "--uninstall" ]]; then
       echo -e "  ${RED}✗${NC} Removed $AGENTS_DIR/$agent"
     fi
   done
+
+  if [[ -d "$SHARE_DIR" ]]; then
+    rm -rf "$SHARE_DIR"
+    echo -e "  ${RED}✗${NC} Removed $SHARE_DIR"
+  fi
+
+  if [[ -f "$RUNTIME_CONFIG" ]]; then
+    rm -f "$RUNTIME_CONFIG"
+    echo -e "  ${RED}✗${NC} Removed $RUNTIME_CONFIG"
+  fi
 
   echo ""
   echo -e "${GREEN}Uninstalled successfully.${NC}"
@@ -61,8 +116,15 @@ if [[ -n "$MISSING" ]]; then
   echo ""
 fi
 
+if [[ "$RUNTIME" == "python" ]] && ! command -v python3 >/dev/null 2>&1; then
+  echo -e "${YELLOW}Warning: python3 not found. Runtime may fall back to bash at execution time.${NC}"
+fi
+if [[ "$RUNTIME" == "bun" ]] && ! command -v bun >/dev/null 2>&1; then
+  echo -e "${YELLOW}Warning: bun not found. Runtime may fall back to bash at execution time.${NC}"
+fi
+
 # Create directories
-mkdir -p "$BIN_DIR" "$COMMANDS_DIR" "$AGENTS_DIR"
+mkdir -p "$BIN_DIR" "$COMMANDS_DIR" "$AGENTS_DIR" "$SHARE_DIR" "$CONFIG_DIR"
 
 # Counters
 NEW=0
@@ -105,6 +167,18 @@ install_file() {
 for tool in cr-gather cr-status cr-next cr-done cr-metrics; do
   install_file "$SCRIPT_DIR/bin/$tool" "$BIN_DIR/$tool" --chmod
 done
+install_file "$SCRIPT_DIR/bin/_cr_dispatch.sh" "$BIN_DIR/_cr_dispatch.sh" --chmod
+
+# Install runtime files
+if [[ -d "$SCRIPT_DIR/runtime" ]]; then
+  rm -rf "$RUNTIME_DIR"
+  mkdir -p "$RUNTIME_DIR"
+  cp -R "$SCRIPT_DIR/runtime/." "$RUNTIME_DIR/"
+  find "$RUNTIME_DIR" -type f -exec chmod +x {} \;
+  echo -e "  ${GREEN}✓${NC} $RUNTIME_DIR ${GREEN}(synced)${NC}"
+else
+  die "runtime directory missing in source"
+fi
 
 # Install slash commands
 for cmd in fix-coderabbit.md coderabbit-cli-review.md; do
@@ -115,6 +189,10 @@ done
 for agent in coderabbit-pr-reviewer.md coderabbit-coordinator.md; do
   install_file "$SCRIPT_DIR/agents/$agent" "$AGENTS_DIR/$agent"
 done
+
+# Persist selected runtime
+echo "$RUNTIME" > "$RUNTIME_CONFIG"
+echo -e "  ${GREEN}✓${NC} Runtime set to '${RUNTIME}' (${RUNTIME_CONFIG})"
 
 # Summary
 TOTAL=$((NEW + UPDATED + CURRENT))
@@ -147,3 +225,8 @@ echo "  /coderabbit-review           # Local review before pushing"
 echo ""
 echo "CLI tools:"
 echo "  cr-gather <PR>   cr-status   cr-next   cr-done <id>   cr-metrics"
+echo ""
+echo "Runtime selection:"
+echo "  Default: $RUNTIME"
+echo "  Override once: CR_IMPL=bash cr-next"
+echo "  Reinstall with runtime: ./install.sh --runtime bun"
