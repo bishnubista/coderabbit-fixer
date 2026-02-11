@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+#
+# cr-gather - Fetch ALL CodeRabbit review comments into a state file
+#
+# Always fetches fresh. Always overwrites existing state.
+# Usage: cr-gather [PR_NUMBER] [--repo OWNER/REPO]
+#
+set -euo pipefail
+
+STATE_FILE=".coderabbit-review.json"
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+
+die() { echo -e "${RED}ERROR: $1${NC}" >&2; exit 1; }
+usage() {
+  cat <<'EOF'
+Usage: cr-gather [PR_NUMBER] [--repo OWNER/REPO]
+
+Fetches CodeRabbit comments and writes .coderabbit-review.json.
+EOF
+}
+
+# Parse arguments
+PR_NUMBER=""
+REPO=""
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --repo)
+      [[ $# -ge 2 ]] || die "--repo requires OWNER/REPO"
+      [[ "$2" != -* ]] || die "--repo requires OWNER/REPO"
+      REPO="$2"
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    -*)
+      die "Unknown flag: $1"
+      ;;
+    *)
+      if [[ -z "$PR_NUMBER" && "$1" =~ ^[0-9]+$ ]]; then
+        PR_NUMBER="$1"
+        shift
+      else
+        die "Invalid argument: $1 (expected PR number)"
+      fi
+      ;;
+  esac
+done
+
+# Prerequisites
+command -v gh >/dev/null 2>&1 || die "gh CLI not found (brew install gh)"
+command -v jq >/dev/null 2>&1 || die "jq not found (brew install jq)"
+gh auth status >/dev/null 2>&1 || die "gh not authenticated (gh auth login)"
+
+# Auto-detect repo and PR
+if [[ -z "$REPO" ]]; then
+  REPO=$(gh repo view --json nameWithOwner -q ".nameWithOwner" 2>/dev/null) || true
+fi
+[[ -z "$REPO" ]] && die "Could not detect repo. Use: cr-gather <PR> --repo owner/name"
+if [[ -z "$PR_NUMBER" ]]; then
+  PR_NUMBER=$(gh pr view --json number -q ".number" 2>/dev/null) || true
+fi
+[[ -z "$PR_NUMBER" ]] && die "Could not detect PR. Use: cr-gather <PR_NUMBER>"
+
+OWNER="${REPO%%/*}"
+REPO_NAME="${REPO##*/}"
+
+echo "Fetching CodeRabbit comments for ${REPO}#${PR_NUMBER}..."
+
+# ── Fetch review threads with cursor-based pagination ──────────────────────
+ALL_THREADS="[]"
+HAS_NEXT=true
+CURSOR=""
+PAGE=0
+
+while [[ "$HAS_NEXT" == "true" ]]; do
+  PAGE=$((PAGE + 1))
+  AFTER_CLAUSE=""
+  [[ -n "$CURSOR" ]] && AFTER_CLAUSE=", after: \"$CURSOR\""
+
+  THREADS_JSON=$(gh api graphql -f query="
+  query {
+    repository(owner: \"$OWNER\", name: \"$REPO_NAME\") {
+      pullRequest(number: $PR_NUMBER) {
+        reviewThreads(first: 100${AFTER_CLAUSE}) {
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+          nodes {
+            id
+            isResolved
+            path
+            line
+            comments(first: 1) {
+              nodes {
+                databaseId
+                author { login }
+                body
+                url
+              }
+            }
+          }
+        }
+      }
+    }
+  }" 2>&1) || die "Failed to fetch review threads (page $PAGE): $THREADS_JSON"
+
+  # Extract pagination info
+  HAS_NEXT=$(echo "$THREADS_JSON" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')
+  CURSOR=$(echo "$THREADS_JSON" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // ""')
+
+  # Append nodes
+  PAGE_NODES=$(echo "$THREADS_JSON" | jq '.data.repository.pullRequest.reviewThreads.nodes')
+  ALL_THREADS=$(jq -s '.[0] + .[1]' <(echo "$ALL_THREADS") <(echo "$PAGE_NODES"))
+
+  [[ "$PAGE" -gt 1 ]] && echo "  Fetched page $PAGE..."
+done
+
+TOTAL_THREADS=$(echo "$ALL_THREADS" | jq 'length')
+echo "  Found $TOTAL_THREADS review threads across $PAGE page(s)"
+
+# Fetch summary comment (finishing touches)
+SUMMARY_JSON=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --jq '
+  [.[] | select(.user.login | ascii_downcase | contains("coderabbit"))] | last | .body // ""
+' 2>&1) || SUMMARY_JSON=""
+
+# Fetch PR reviews (nitpicks in review body)
+REVIEWS_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --jq '
+  [.[] | select(.user.login | ascii_downcase | contains("coderabbit")) | .body] | join("\n---REVIEW_SEPARATOR---\n")
+' 2>&1) || REVIEWS_JSON=""
+
+# ── Parse inline threads ───────────────────────────────────────────────────
+# Captures thread_id (GraphQL ID) for thread resolution via cr-done
+ISSUES_JSON=$(echo "$ALL_THREADS" | jq '
+  [.[]
+    | select(.isResolved == false)
+    | select(.comments.nodes | length > 0)
+    | select(.comments.nodes[0].author.login | test("coderabbit"; "i"))
+    | .comments.nodes[0] as $comment
+    | {
+        id: ("thread-" + ($comment.databaseId | tostring)),
+        thread_id: .id,
+        type: "inline",
+        file: .path,
+        line: .line,
+        url: $comment.url,
+        body: $comment.body,
+        severity: (
+          if ($comment.body | test("🔴|\\b[Cc]ritical\\b|[Ss]everity:\\s*[Cc]ritical")) then "critical"
+          elif ($comment.body | test("🟠|\\b[Mm]ajor\\b|\\b[Hh]igh\\b|[Ss]everity:\\s*([Mm]ajor|[Hh]igh)")) then "major"
+          elif ($comment.body | test("🟡|\\b[Mm]inor\\b|\\b[Mm]edium\\b|[Ss]everity:\\s*([Mm]inor|[Mm]edium)")) then "minor"
+          elif ($comment.body | test("💬|🔵|⚪|\\b[Tt]rivial\\b|\\b[Ii]nfo\\b|\\b[Nn]itpick\\b|\\b[Ss]uggestion\\b|\\b[Ll]ow\\b|[Ss]everity:\\s*([Tt]rivial|[Ii]nfo|[Ll]ow)")) then "nitpick"
+          else "other" end
+        ),
+        status: "pending"
+      }
+  ]
+  | sort_by(
+      if .severity == "critical" then 0
+      elif .severity == "major" then 1
+      elif .severity == "minor" then 2
+      elif .severity == "nitpick" then 3
+      else 4 end,
+      .file
+    )
+')
+
+# ── Parse finishing touches from summary ───────────────────────────────────
+FINISHING_JSON="[]"
+if [[ -n "$SUMMARY_JSON" && "$SUMMARY_JSON" != "null" ]]; then
+  FINISHING_JSON=$(echo "$SUMMARY_JSON" | jq -Rs '
+    [scan("- \\[ \\] [^>]*> ([^\n]+)")]
+    | to_entries
+    | map({
+        id: ("finishing-" + (.key | tostring)),
+        thread_id: null,
+        type: "finishing",
+        file: null, line: null, url: null,
+        body: (.value | if type == "array" then .[0] else . end),
+        severity: "minor",
+        status: "pending"
+      })
+  ' 2>/dev/null || echo "[]")
+fi
+
+# ── Parse nitpicks from review bodies (markdown-based, not HTML regex) ─────
+NITPICKS_JSON="[]"
+if [[ -n "$REVIEWS_JSON" && "$REVIEWS_JSON" != "null" ]]; then
+  # Extract file-scoped nitpick blocks using jq string operations
+  NITPICKS_JSON=$(echo "$REVIEWS_JSON" | jq -Rs '
+    # Split by file sections — look for **filename** or `filename` patterns
+    [splits("(?=<details>|(?=\\*\\*[a-zA-Z]))")]
+    | map(select(length > 10))
+    | to_entries
+    | map(
+        # Try to extract filename from <summary> tag or **bold** pattern
+        (.value | (
+          capture("<summary>(?<file>[a-zA-Z0-9_./-]+\\.[a-zA-Z0-9]+)"; "g")
+          // capture("\\*\\*(?<file>[a-zA-Z0-9_./-]+\\.[a-zA-Z0-9]+)\\*\\*"; "g")
+          // capture("`(?<file>[a-zA-Z0-9_./-]+\\.[a-zA-Z0-9]+)`"; "g")
+        ) // null) as $match
+        | if $match then
+            {
+              id: ("nitpick-" + (.key | tostring)),
+              thread_id: null,
+              type: "nitpick",
+              file: $match.file,
+              line: null,
+              url: null,
+              body: (.value | gsub("<[^>]+>"; "") | gsub("\\s+"; " ") | .[0:1000]),
+              severity: "nitpick",
+              status: "pending"
+            }
+          else empty end
+      )
+  ' 2>/dev/null || echo "[]")
+fi
+
+# ── Combine all issues ─────────────────────────────────────────────────────
+ALL_ISSUES=$(jq -s '.[0] + .[1] + .[2]' <(echo "$ISSUES_JSON") <(echo "$FINISHING_JSON") <(echo "$NITPICKS_JSON"))
+
+# Build summary using the severity field (not regex re-matching)
+SUMMARY=$(echo "$ALL_ISSUES" | jq '{
+  total: length,
+  critical: [.[] | select(.severity == "critical")] | length,
+  major: [.[] | select(.severity == "major")] | length,
+  minor: [.[] | select(.severity == "minor")] | length,
+  nitpick: [.[] | select(.severity == "nitpick" or .type == "nitpick")] | length,
+  pending: [.[] | select(.status == "pending")] | length,
+  fixed: 0,
+  files: ([.[] | select(.file != null) | .file] | unique | length)
+}')
+
+# Write state file
+jq -n --arg repo "$REPO" --argjson pr "$PR_NUMBER" \
+  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --argjson summary "$SUMMARY" --argjson issues "$ALL_ISSUES" \
+  '{repository: $repo, pr_number: $pr, gathered_at: $ts, summary: $summary, issues: $issues, metrics: {started_at: $ts}}' > "$STATE_FILE"
+
+echo -e "${GREEN}✅ $STATE_FILE${NC}"
+echo "$SUMMARY" | jq -r '"  🔴 \(.critical) critical  🟠 \(.major) major  🟡 \(.minor) minor  💬 \(.nitpick) nitpick  ── \(.total) total across \(.files) files"'
+
+# Auto-escalation hint
+FILE_COUNT=$(echo "$SUMMARY" | jq '.files')
+TOTAL_COUNT=$(echo "$SUMMARY" | jq '.total')
+if [[ "$TOTAL_COUNT" -ge 5 && "$FILE_COUNT" -ge 3 ]]; then
+  echo ""
+  echo -e "${YELLOW}💡 Tip: $TOTAL_COUNT issues across $FILE_COUNT files — consider using the coderabbit-coordinator agent for parallel fixes.${NC}"
+fi

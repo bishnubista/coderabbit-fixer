@@ -1,0 +1,14 @@
+{
+  "name": "bishnubista",
+  "owner": {
+    "name": "Bishnu Bista",
+    "url": "https://github.com/bishnubista"
+  },
+  "plugins": [
+    {
+      "name": "coderabbit-fixer",
+      "source": ".",
+      "description": "Automatically fix CodeRabbit PR comments with verification, thread resolution, and metrics."
+    }
+  ]
+}

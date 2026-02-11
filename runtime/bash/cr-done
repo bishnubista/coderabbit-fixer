@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+#
+# cr-done - Mark CodeRabbit issues as fixed and resolve GitHub threads
+#
+# Usage:
+#   cr-done <id> [id2...]     # Mark issues as fixed + resolve threads
+#   cr-done --last [N]        # Mark first N IDs from latest cr-next output (default: 2)
+#   cr-done --no-resolve      # Skip GitHub thread resolution
+#
+set -euo pipefail
+
+STATE_FILE=".coderabbit-review.json"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# LLM-friendly error handler
+error_for_llm() {
+  local msg="$1"
+  echo -e "${RED}ERROR: $msg${NC}" >&2
+  echo "" >&2
+  echo "🤖 LLM RECOVERY HINT:" >&2
+  echo "  $2" >&2
+  exit 1
+}
+usage() {
+  cat <<'EOF'
+Usage:
+  cr-done <id> [id2...]
+  cr-done --last [N]
+  cr-done --no-resolve
+EOF
+}
+
+# Check state file exists
+[[ -f "$STATE_FILE" ]] || error_for_llm "State file not found" "Run: cr-gather <PR_NUMBER>"
+
+# Parse arguments
+IDS=()
+LAST_N=""
+RESOLVE=true
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --last)
+      LAST_N=2
+      if [[ "${2:-}" =~ ^[0-9]+$ ]]; then
+        LAST_N="$2"
+        shift 2
+      else
+        shift
+      fi
+      ;;
+    --no-resolve)
+      RESOLVE=false
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    -*)
+      error_for_llm "Unknown flag: $1" "Use: cr-done <id...> | cr-done --last [N] | cr-done --no-resolve"
+      ;;
+    *)
+      IDS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+# Handle --last flag
+if [[ -n "$LAST_N" ]]; then
+  [[ "$LAST_N" =~ ^[0-9]+$ && "$LAST_N" -ge 1 ]] || error_for_llm "Invalid --last value: $LAST_N" "Use: cr-done --last 2"
+
+  CANDIDATES=()
+  while IFS= read -r shown_id; do
+    [[ -z "$shown_id" ]] && continue
+    STATUS=$(jq -r --arg id "$shown_id" '.issues[] | select(.id == $id) | .status // empty' "$STATE_FILE")
+    [[ "$STATUS" == "pending" ]] && CANDIDATES+=("$shown_id")
+  done < <(jq -r '.session.last_shown_ids[]?' "$STATE_FILE")
+
+  # Fallback for older state files that do not track "last shown" batches.
+  if [[ ${#CANDIDATES[@]} -eq 0 ]]; then
+    while IFS= read -r pending_id; do
+      [[ -n "$pending_id" ]] && CANDIDATES+=("$pending_id")
+    done < <(jq -r '.issues[] | select(.status == "pending") | .id' "$STATE_FILE")
+  fi
+
+  if [[ ${#CANDIDATES[@]} -eq 0 ]]; then
+    echo -e "${YELLOW}No pending issues to mark.${NC}"
+    exit 0
+  fi
+
+  LIMIT="$LAST_N"
+  [[ "$LIMIT" -gt "${#CANDIDATES[@]}" ]] && LIMIT="${#CANDIDATES[@]}"
+  for ((i=0; i<LIMIT; i++)); do
+    IDS+=("${CANDIDATES[$i]}")
+  done
+fi
+
+# Check we have IDs to mark
+if [[ ${#IDS[@]} -eq 0 ]]; then
+  error_for_llm "No issue IDs provided" "Usage: cr-done <id> or cr-done --last 2"
+fi
+
+# Mark each ID as fixed
+MARKED=0
+RESOLVED=0
+for id in "${IDS[@]}"; do
+  # Check if ID exists
+  EXISTS=$(jq --arg id "$id" '[.issues[] | select(.id == $id)] | length' "$STATE_FILE")
+
+  if [[ "$EXISTS" -eq 0 ]]; then
+    echo -e "${YELLOW}Warning: ID '$id' not found, skipping${NC}"
+    continue
+  fi
+
+  # Check if already fixed
+  STATUS=$(jq -r --arg id "$id" '.issues[] | select(.id == $id) | .status' "$STATE_FILE")
+
+  if [[ "$STATUS" == "fixed" ]]; then
+    echo -e "${YELLOW}ID '$id' already marked as fixed${NC}"
+    continue
+  fi
+
+  # Update status to fixed
+  TEMP_FILE=$(mktemp)
+  jq --arg id "$id" '
+    .issues |= map(if .id == $id then .status = "fixed" else . end)
+  ' "$STATE_FILE" > "$TEMP_FILE" && mv "$TEMP_FILE" "$STATE_FILE"
+
+  echo -e "${GREEN}✅ Marked $id as fixed${NC}"
+  MARKED=$((MARKED + 1))
+
+  # Resolve GitHub thread if thread_id exists
+  if [[ "$RESOLVE" == "true" ]]; then
+    THREAD_ID=$(jq -r --arg id "$id" '.issues[] | select(.id == $id) | .thread_id // ""' "$STATE_FILE")
+    if [[ -n "$THREAD_ID" && "$THREAD_ID" != "null" ]]; then
+      if gh api graphql -f query="
+        mutation {
+          resolveReviewThread(input: { threadId: \"$THREAD_ID\" }) {
+            thread { isResolved }
+          }
+        }" >/dev/null 2>&1; then
+        echo -e "   ${GREEN}↳ Resolved GitHub thread${NC}"
+        RESOLVED=$((RESOLVED + 1))
+      else
+        echo -e "   ${YELLOW}↳ Could not resolve thread (may need write access)${NC}"
+      fi
+    fi
+  fi
+done
+
+# Update summary counts
+TEMP_FILE=$(mktemp)
+jq '
+  .summary.fixed = ([.issues[] | select(.status == "fixed")] | length) |
+  .summary.pending = ([.issues[] | select(.status == "pending")] | length)
+' "$STATE_FILE" > "$TEMP_FILE" && mv "$TEMP_FILE" "$STATE_FILE"
+
+# Show progress
+TOTAL=$(jq '.issues | length' "$STATE_FILE")
+FIXED=$(jq '[.issues[] | select(.status == "fixed")] | length' "$STATE_FILE")
+REMAINING=$((TOTAL - FIXED))
+
+echo ""
+echo "Progress: $FIXED/$TOTAL fixed ($REMAINING remaining)"
+[[ "$RESOLVED" -gt 0 ]] && echo "Resolved $RESOLVED GitHub thread(s)"
+
+if [[ "$REMAINING" -eq 0 ]]; then
+  echo ""
+  echo -e "${GREEN}🎉 All issues fixed!${NC}"
+  echo ""
+  echo "Next: validate → git add <files> → commit → push → cr-gather (verify no new comments)"
+else
+  echo ""
+  echo "Run 'cr-next' to see remaining issues"
+fi

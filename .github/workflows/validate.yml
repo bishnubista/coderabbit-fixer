@@ -1,0 +1,84 @@
+name: Validate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  shell-and-manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install validation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck jq
+
+      - name: Bash syntax check
+        run: |
+          bash -n bin/_cr_dispatch.sh
+          bash -n bin/cr-gather
+          bash -n bin/cr-next
+          bash -n bin/cr-status
+          bash -n bin/cr-done
+          bash -n bin/cr-metrics
+          bash -n runtime/bash/cr-gather
+          bash -n runtime/bash/cr-next
+          bash -n runtime/bash/cr-status
+          bash -n runtime/bash/cr-done
+          bash -n runtime/bash/cr-metrics
+          bash -n install.sh
+          bash -n tests/cr-gather-fixtures.sh
+          bash -n tests/cr-state-tools.sh
+          bash -n tests/runtime-parity.sh
+          bash -n tests/runtime-dispatch.sh
+          bash -n tests/run.sh
+
+      - name: ShellCheck
+        run: |
+          shellcheck -x bin/_cr_dispatch.sh
+          shellcheck -x bin/cr-gather
+          shellcheck -x bin/cr-next
+          shellcheck -x bin/cr-status
+          shellcheck -x bin/cr-done
+          shellcheck -x bin/cr-metrics
+          shellcheck -x runtime/bash/cr-gather
+          shellcheck -x runtime/bash/cr-next
+          shellcheck -x runtime/bash/cr-status
+          shellcheck -x runtime/bash/cr-done
+          shellcheck -x runtime/bash/cr-metrics
+          shellcheck -x install.sh
+          shellcheck -x tests/cr-gather-fixtures.sh
+          shellcheck -x tests/cr-state-tools.sh
+          shellcheck -x tests/runtime-parity.sh
+          shellcheck -x tests/runtime-dispatch.sh
+          shellcheck -x tests/run.sh
+
+      - name: Validate Python runtime files
+        run: |
+          python3 -m py_compile runtime/python/_dispatch.py
+          python3 -m py_compile runtime/python/cr-gather
+          python3 -m py_compile runtime/python/cr-next
+          python3 -m py_compile runtime/python/cr-status
+          python3 -m py_compile runtime/python/cr-done
+          python3 -m py_compile runtime/python/cr-metrics
+
+      - name: Validate Bun runtime files
+        run: |
+          for file in runtime/bun/_dispatch.mjs runtime/bun/cr-gather runtime/bun/cr-next runtime/bun/cr-status runtime/bun/cr-done runtime/bun/cr-metrics; do
+            node --input-type=module --check < "$file"
+          done
+
+      - name: Validate JSON manifests
+        run: |
+          jq -e . .claude-plugin/plugin.json >/dev/null
+          jq -e . marketplace.json >/dev/null
+
+      - name: Run regression tests
+        run: ./tests/run.sh

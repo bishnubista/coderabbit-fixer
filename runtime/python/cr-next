@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import os
+import sys
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+STATE_FILE = Path(".coderabbit-review.json")
+RED = "\033[0;31m"
+GREEN = "\033[0;32m"
+NC = "\033[0m"
+
+
+def usage() -> None:
+    print(
+        "Usage:\n"
+        "  cr-next [N]\n"
+        "  cr-next --quick\n"
+        "  cr-next --all\n"
+        "  cr-next --brief"
+    )
+
+
+def die(message: str) -> "None":
+    print(f"{RED}ERROR: {message}{NC}", file=sys.stderr)
+    print("Run: cr-gather <PR>", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def parse_args(argv: list[str]) -> tuple[int, bool, bool, bool]:
+    count = 2
+    all_mode = False
+    quick = False
+    brief = False
+    count_set = False
+
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--all":
+            all_mode = True
+        elif arg == "--quick":
+            quick = True
+        elif arg == "--brief":
+            brief = True
+        elif arg in ("--help", "-h"):
+            usage()
+            raise SystemExit(0)
+        elif arg.startswith("-"):
+            die(f"Unknown flag: {arg}")
+        else:
+            if not arg.isdigit():
+                die(f"Invalid argument: {arg}")
+            if count_set:
+                die("Count provided multiple times")
+            count = int(arg)
+            count_set = True
+        i += 1
+
+    if count < 1:
+        die("Count must be >= 1")
+
+    return count, all_mode, quick, brief
+
+
+def load_state() -> dict[str, Any]:
+    if not STATE_FILE.exists():
+        die("State file not found")
+    try:
+        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        die(f"Invalid state JSON: {exc}")
+    return {}
+
+
+def write_state(state: dict[str, Any]) -> None:
+    state_dir = STATE_FILE.parent
+    fd, tmp_path = tempfile.mkstemp(prefix=".coderabbit-review.", suffix=".json", dir=state_dir)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+            f.write("\n")
+        os.replace(tmp_path, STATE_FILE)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
+def now_utc() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def record_last_shown(state: dict[str, Any], ids: list[str]) -> None:
+    session = state.get("session")
+    if not isinstance(session, dict):
+        session = {}
+    session["last_shown_ids"] = ids
+    session["last_shown_at"] = now_utc()
+    state["session"] = session
+    write_state(state)
+
+
+def severity_rank(issue: dict[str, Any]) -> int:
+    severity = issue.get("severity")
+    if severity == "critical":
+        return 0
+    if severity == "major":
+        return 1
+    if severity == "minor":
+        return 2
+    if severity == "nitpick":
+        return 3
+    return 4
+
+
+def issue_file_key(issue: dict[str, Any]) -> str:
+    file_path = issue.get("file")
+    return file_path if isinstance(file_path, str) and file_path else "zzz"
+
+
+def pending_issues(issues: list[dict[str, Any]], quick: bool) -> list[dict[str, Any]]:
+    pending = [i for i in issues if i.get("status") == "pending"]
+    if quick:
+        pending = [i for i in pending if i.get("severity") in ("critical", "major")]
+    return pending
+
+
+def render_issue(issue: dict[str, Any], brief: bool) -> str:
+    issue_id = issue.get("id", "N/A")
+    severity = issue.get("severity", "other")
+    file_path = issue.get("file") if issue.get("file") is not None else "N/A"
+    line = issue.get("line") if issue.get("line") is not None else "N/A"
+    url = issue.get("url")
+    body = issue.get("body", "")
+    if not isinstance(body, str):
+        body = str(body)
+    if brief and len(body) > 500:
+        body = body[:500] + "\n\n...[truncated]"
+
+    parts = [
+        f"## [{issue_id}] [{severity}]",
+        f"**File:** {file_path} | **Line:** {line}",
+    ]
+    if url:
+        parts.append(f"**URL:** {url}")
+    parts.append("")
+    parts.append(body)
+    parts.append("")
+    parts.append("---")
+    parts.append("")
+    return "\n".join(parts)
+
+
+def main(argv: list[str]) -> int:
+    count, all_mode, quick, brief = parse_args(argv)
+    state = load_state()
+
+    raw_issues = state.get("issues")
+    if not isinstance(raw_issues, list):
+        raw_issues = []
+    issues: list[dict[str, Any]] = [i for i in raw_issues if isinstance(i, dict)]
+
+    total = len(issues)
+    fixed = sum(1 for i in issues if i.get("status") == "fixed")
+
+    if quick:
+        pending = len(pending_issues(issues, True))
+    else:
+        pending = total - fixed
+
+    if pending == 0:
+        record_last_shown(state, [])
+        if quick:
+            skipped = total - fixed
+            print(f"{GREEN}All critical/major issues fixed!{NC} ({skipped} minor/nitpick skipped)")
+        else:
+            print(f"{GREEN}All {total} issues fixed!{NC}")
+        print("Next: validate, commit, push, then cr-gather to verify no new comments.")
+        return 0
+
+    sorted_issues = sorted(pending_issues(issues, quick), key=lambda i: (severity_rank(i), issue_file_key(i)))
+    selected = sorted_issues if all_mode else sorted_issues[:count]
+
+    if not selected:
+        record_last_shown(state, [])
+        if quick:
+            print(f"{GREEN}No critical/major issues remaining.{NC}")
+            print("Run cr-next without --quick to see minor/nitpick issues.")
+        else:
+            print(f"{GREEN}All {total} issues fixed!{NC}")
+        return 0
+
+    shown_ids = [str(i.get("id", "")) for i in selected if i.get("id")]
+    record_last_shown(state, shown_ids)
+
+    files = sorted({(i.get("file") if i.get("file") is not None else "general") for i in selected})
+    file_list = ", ".join(files)
+    file_count = len(files)
+
+    print(f"# CodeRabbit Issues ({fixed}/{total} fixed, {pending} remaining)")
+    if quick:
+        print("Mode: --quick (critical + major only)")
+    print(f"Files in this batch: {file_list} ({file_count} file(s))")
+    print("")
+
+    for issue in selected:
+        print(render_issue(issue, brief), end="")
+
+    print("Fix then run: cr-done <id1> [id2...]")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

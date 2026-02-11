@@ -27,37 +27,43 @@ If the command is NOT found, stop and tell the user:
 
 > **CodeRabbit CLI is not installed.** Install it with one of:
 >
-> - **curl (macOS/Linux):** `curl -fsSL https://cli.coderabbit.ai/install.sh | sh`
-> - **Homebrew (macOS):** `brew install --cask coderabbit`
+> - **curl (macOS/Linux):** `curl -sSL https://cli.coderabbit.ai/install.sh | sh`
+> - **Homebrew (macOS):** `brew install coderabbitai/tap/coderabbit`
 >
 > Then restart your shell and retry.
 >
-> See: https://docs.coderabbit.ai/cli/overview
+> See: https://docs.coderabbit.ai/cli/getting-started
 
 Do NOT proceed to Step 1 if the CLI is missing.
 
 ### Step 1: Determine Review Type
 
-Parse `$ARGUMENTS` to determine the review type:
+Parse `$ARGUMENTS` and build a valid CodeRabbit CLI command:
 
-| Argument | Review Type | Description |
-|----------|-------------|-------------|
-| (none) | `uncommitted` | Review staged + unstaged changes |
-| `--staged` | `staged` | Review only staged changes |
-| `--committed` | `committed` | Review last commit vs parent |
-| `--branch` | `branch` | Review current branch vs main |
+| Argument | CLI Value | Description |
+|----------|-----------|-------------|
+| (none) | `all` | Review both committed + uncommitted changes |
+| `committed` | `committed` | Review committed changes |
+| `uncommitted` | `uncommitted` | Review working tree changes |
+| `all` | `all` | Explicit default mode |
+| `--base <branch>` | `--base <branch>` | Compare committed changes against a base branch |
+
+Backward compatibility aliases (map silently):
+- `--committed` → `committed`
+- `--staged` → `uncommitted`
+- `--branch` → `committed --base main`
 
 ### Step 2: Run CodeRabbit CLI
 
 ```bash
-# Default: review uncommitted changes
-coderabbit review --plain
+# Default: review all changes
+coderabbit --plain --type all
 
-# Or with specific type:
-coderabbit review --plain --type <TYPE>
+# Specific mode:
+coderabbit --plain --type <all|committed|uncommitted>
 
-# For branch comparison:
-coderabbit review --plain --type branch --base-branch main
+# Compare against a specific base branch:
+coderabbit --plain --type committed --base <branch>
 ```
 
 ### Step 3: Present Results
@@ -72,16 +78,16 @@ Display the CodeRabbit output to the user. If issues are found:
 
 If the user wants fixes:
 1. Address issues one at a time
-2. Re-run `coderabbit review --plain` after fixes
+2. Re-run `coderabbit --plain --type all` (or the same mode) after fixes
 3. Continue until clean or user is satisfied
 
 ## Examples
 
 ```bash
-/coderabbit-review              # Review all uncommitted changes
-/coderabbit-review --staged     # Review only staged changes
-/coderabbit-review --committed  # Review the last commit
-/coderabbit-review --branch     # Review branch vs main
+/coderabbit-review              # Review all changes
+/coderabbit-review committed    # Review committed changes
+/coderabbit-review uncommitted  # Review working tree changes
+/coderabbit-review committed --base main
 ```
 
 ## Notes
@@ -90,3 +96,4 @@ If the user wants fixes:
 - Reviews only analyze diffs, not entire codebase
 - Output is in plain text format for easy parsing
 - Uses locally installed `coderabbit` CLI (on your PATH; location varies by install method)
+- CLI is currently available on macOS, Linux, and Windows via WSL
