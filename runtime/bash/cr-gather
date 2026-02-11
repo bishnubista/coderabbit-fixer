@@ -54,9 +54,13 @@ command -v jq >/dev/null 2>&1 || die "jq not found (brew install jq)"
 gh auth status >/dev/null 2>&1 || die "gh not authenticated (gh auth login)"
 
 # Auto-detect repo and PR
-[[ -z "$REPO" ]] && REPO=$(gh repo view --json nameWithOwner -q '.nameWithOwner' 2>/dev/null) || true
+if [[ -z "$REPO" ]]; then
+  REPO=$(gh repo view --json nameWithOwner -q ".nameWithOwner" 2>/dev/null) || true
+fi
 [[ -z "$REPO" ]] && die "Could not detect repo. Use: cr-gather <PR> --repo owner/name"
-[[ -z "$PR_NUMBER" ]] && PR_NUMBER=$(gh pr view --json number -q '.number' 2>/dev/null) || true
+if [[ -z "$PR_NUMBER" ]]; then
+  PR_NUMBER=$(gh pr view --json number -q ".number" 2>/dev/null) || true
+fi
 [[ -z "$PR_NUMBER" ]] && die "Could not detect PR. Use: cr-gather <PR_NUMBER>"
 
 OWNER="${REPO%%/*}"

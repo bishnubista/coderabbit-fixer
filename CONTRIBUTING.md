@@ -5,7 +5,7 @@ Thanks for contributing to `coderabbit-fixer`.
 ## Development Setup
 
 1. Clone the repository.
-2. Install required tools: `gh`, `jq`, `python3`.
+2. Install required tools: `gh`, `jq`, `python3`, `shellcheck`.
 3. Optional: install `bun` to validate Bun runtime behavior.
 
 ## Validate Changes
